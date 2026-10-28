@@ -1,5 +1,8 @@
 // Central gateway configuration — loads .env once; every module reads from here.
-require('dotenv').config();
+// The .env path is resolved relative to this file so scripts and workers find
+// it no matter what the process working directory is.
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const config = {
   env: process.env.NODE_ENV || 'development',
