@@ -1,8 +1,12 @@
 // Full-screen transition overlay — locked to the Radar loader.
 // Renders above everything (Modal) with a soft fade.
-// Built-in Animated only — no native worklets runtime required.
-import React, { useEffect, useRef } from 'react';
-import { Modal, Text, StyleSheet, Animated } from 'react-native';
+import React, { useEffect } from 'react';
+import { Modal, View, Text, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from 'react-native-reanimated';
 import BrandLoader from './BrandLoader';
 import { colors, fonts, brandSoftLight, loaderTrack } from '../../theme';
 
@@ -11,24 +15,19 @@ export default function FullScreenLoader({
   label,
   theme = 'dark',
 }) {
-  const opacity = useRef(new Animated.Value(0)).current;
+  const opacity = useSharedValue(0);
 
   useEffect(() => {
-    const anim = Animated.timing(opacity, {
-      toValue: visible ? 1 : 0,
-      duration: 220,
-      useNativeDriver: true,
-    });
-    anim.start();
-    return () => anim.stop();
-  }, [visible, opacity]);
+    opacity.value = withTiming(visible ? 1 : 0, { duration: 220 });
+  }, [visible]);
 
+  const veil = useAnimatedStyle(() => ({ opacity: opacity.value }));
   const veilColor =
     theme === 'dark' ? 'rgba(33,78,59,0.96)' : 'rgba(247,243,233,0.96)';
 
   return (
     <Modal visible={visible} transparent animationType="none" statusBarTranslucent>
-      <Animated.View style={[styles.fill, { backgroundColor: veilColor, opacity }]}>
+      <Animated.View style={[styles.fill, { backgroundColor: veilColor }, veil]}>
         <BrandLoader
           variant="radar"
           size={120}

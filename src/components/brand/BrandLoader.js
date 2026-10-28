@@ -3,12 +3,17 @@
 //  comet    : five-layer comet tail chasing a gold head
 //  radar    : three pulse rings radiating outward (buttons + full-screen)
 //  sweep    : counter-rotating sweep arcs with a gold comet head
-//
-// Built on React Native's built-in Animated API (no native worklets runtime),
-// so the same animations run identically in Expo Go and production builds.
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, Easing } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withDelay,
+  Easing,
+} from 'react-native-reanimated';
 import { colors, brandSoftLight, loaderTrack } from '../../theme';
 
 export default function BrandLoader({
@@ -34,24 +39,15 @@ export default function BrandLoader({
 
 /* ---------- helpers ---------- */
 function useRotation(duration, reverse = false) {
-  const v = useRef(new Animated.Value(0)).current;
+  const v = useSharedValue(0);
   useEffect(() => {
-    const anim = Animated.loop(
-      Animated.timing(v, {
-        toValue: reverse ? -360 : 360,
-        duration,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
+    v.value = withRepeat(
+      withTiming(reverse ? -360 : 360, { duration, easing: Easing.linear }),
+      -1,
+      false
     );
-    anim.start();
-    return () => anim.stop();
-  }, [duration, reverse, v]);
-  return {
-    transform: [
-      { rotate: v.interpolate({ inputRange: [-360, 360], outputRange: ['-360deg', '360deg'] }) },
-    ],
-  };
+  }, [duration, reverse]);
+  return useAnimatedStyle(() => ({ transform: [{ rotate: `${v.value}deg` }] }));
 }
 
 function Ring({ r, stroke, strokeWidth, dashArray, dashOffset, opacity }) {
@@ -127,31 +123,29 @@ function Comet({ size, color, gold, track }) {
 
 /* ---------- radar ---------- */
 function RadarRing({ index, boxSize, color }) {
-  const p = useRef(new Animated.Value(0)).current;
+  const p = useSharedValue(0);
   useEffect(() => {
-    const anim = Animated.sequence([
-      Animated.delay(index * 220),
-      Animated.loop(
-        Animated.timing(p, {
-          toValue: 1,
-          duration: 1050,
-          easing: Easing.bezier(0.2, 0.7, 0.3, 1),
-          useNativeDriver: true,
-        })
-      ),
-    ]);
-    anim.start();
-    return () => anim.stop();
-  }, [index, p]);
-  const scale = p.interpolate({ inputRange: [0, 1], outputRange: [0.24, 1.42] });
-  const opacity = p.interpolate({ inputRange: [0, 0.1, 1], outputRange: [0, 0.9, 0] });
+    p.value = withDelay(
+      index * 220,
+      withRepeat(
+        withTiming(1, { duration: 1050, easing: Easing.bezier(0.2, 0.7, 0.3, 1) }),
+        -1,
+        false
+      )
+    );
+  }, [index]);
+  const st = useAnimatedStyle(() => {
+    const scale = 0.24 + p.value * (1.42 - 0.24);
+    const opacity = p.value < 0.1 ? (p.value / 0.1) * 0.9 : 0.9 * (1 - (p.value - 0.1) / 0.9);
+    return { transform: [{ scale }], opacity };
+  });
   const s = boxSize * 0.92;
   return (
     <Animated.View
       style={[
         styles.ring,
         { width: s, height: s, borderRadius: s / 2, borderColor: color },
-        { transform: [{ scale }], opacity },
+        st,
       ]}
     />
   );

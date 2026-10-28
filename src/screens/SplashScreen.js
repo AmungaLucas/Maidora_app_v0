@@ -2,16 +2,22 @@
 // Presentational only — App/AppContext decide when to move on (the boot gate
 // holds the splash for at least SPLASH_MIN_MS so the full timeline plays).
 //
-// Built on React Native's built-in Animated API (no native worklets runtime),
-// so the same animation runs identically in Expo Go and production builds.
-//
 // Timeline (ms):
 //   0    two radar rings start pinging behind the mark (1.5s loop, offset)
 //   50   mark drops into place with an overshoot spring (~600ms)
 //   350  M-A-I-D-O-R-A springs up letter by letter (+50ms per letter)
 //   950  tagline fades in
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withDelay,
+  withTiming,
+  withSpring,
+  withRepeat,
+  Easing,
+} from 'react-native-reanimated';
 import BrandMark from '../components/brand/BrandMark';
 import { colors, fonts, splashThemes } from '../theme';
 
@@ -22,55 +28,44 @@ const MARK_SPRING = { damping: 12, stiffness: 165, mass: 0.8 };
 
 /* one radar pulse ring, looping */
 function PingRing({ delay, color }) {
-  const p = useRef(new Animated.Value(0)).current;
+  const p = useSharedValue(0);
   useEffect(() => {
-    const anim = Animated.sequence([
-      Animated.delay(delay),
-      Animated.loop(
-        Animated.timing(p, {
-          toValue: 1,
-          duration: 1500,
-          easing: Easing.bezier(0.2, 0.7, 0.3, 1),
-          useNativeDriver: true,
-        })
-      ),
-    ]);
-    anim.start();
-    return () => anim.stop();
-  }, [delay, p]);
-  const scale = p.interpolate({ inputRange: [0, 1], outputRange: [0.24, 1.4] });
-  const opacity = p.interpolate({ inputRange: [0, 0.08, 1], outputRange: [0, 0.8, 0] });
-  return (
-    <Animated.View
-      style={[styles.ring, { borderColor: color }, { transform: [{ scale }], opacity }]}
-    />
-  );
+    p.value = withDelay(
+      delay,
+      withRepeat(
+        withTiming(1, { duration: 1500, easing: Easing.bezier(0.2, 0.7, 0.3, 1) }),
+        -1,
+        false
+      )
+    );
+  }, [delay]);
+  const st = useAnimatedStyle(() => {
+    const scale = 0.24 + p.value * (1.4 - 0.24);
+    const opacity = p.value < 0.08 ? (p.value / 0.08) * 0.8 : 0.8 * (1 - (p.value - 0.08) / 0.92);
+    return { transform: [{ scale }], opacity };
+  });
+  return <Animated.View style={[styles.ring, { borderColor: color }, st]} />;
 }
 
 /* one springing letter */
 function PingLetter({ ch, delay, color }) {
-  const ty = useRef(new Animated.Value(44)).current;
-  const sc = useRef(new Animated.Value(0.7)).current;
-  const op = useRef(new Animated.Value(0)).current;
+  const ty = useSharedValue(44);
+  const sc = useSharedValue(0.7);
+  const op = useSharedValue(0);
 
   useEffect(() => {
-    const anim = Animated.parallel([
-      Animated.spring(ty, { toValue: 0, ...SPRING, useNativeDriver: true, delay }),
-      Animated.spring(sc, { toValue: 1, ...SPRING, useNativeDriver: true, delay }),
-      Animated.timing(op, { toValue: 1, duration: 120, useNativeDriver: true, delay }),
-    ]);
-    anim.start();
-    return () => anim.stop();
-  }, [ty, sc, op, delay]);
+    ty.value = withDelay(delay, withSpring(0, SPRING));
+    sc.value = withDelay(delay, withSpring(1, SPRING));
+    op.value = withDelay(delay, withTiming(1, { duration: 120 }));
+  }, [delay]);
+
+  const st = useAnimatedStyle(() => ({
+    transform: [{ translateY: ty.value }, { scale: sc.value }],
+    opacity: op.value,
+  }));
 
   return (
-    <Animated.Text
-      style={[
-        styles.letter,
-        { color },
-        { transform: [{ translateY: ty }, { scale: sc }], opacity },
-      ]}
-    >
+    <Animated.Text style={[styles.letter, { color }, st]}>
       {ch}
     </Animated.Text>
   );
@@ -78,36 +73,28 @@ function PingLetter({ ch, delay, color }) {
 
 export default function SplashScreen({ theme = 'light' }) {
   const t = splashThemes[theme] || splashThemes.light;
+  const startedRef = useRef(Date.now());
 
   /* mark drop */
-  const mTy = useRef(new Animated.Value(-52)).current;
-  const mSc = useRef(new Animated.Value(0.92)).current;
-  const mOp = useRef(new Animated.Value(0)).current;
+  const mTy = useSharedValue(-52);
+  const mSc = useSharedValue(0.92);
+  const mOp = useSharedValue(0);
   /* tagline fade */
-  const tagOp = useRef(new Animated.Value(0)).current;
+  const tagOp = useSharedValue(0);
 
   useEffect(() => {
-    const mark = Animated.parallel([
-      Animated.timing(mOp, { toValue: 1, duration: 140, useNativeDriver: true, delay: 50 }),
-      Animated.spring(mTy, { toValue: 0, ...MARK_SPRING, useNativeDriver: true, delay: 50 }),
-      Animated.spring(mSc, { toValue: 1, ...MARK_SPRING, useNativeDriver: true, delay: 50 }),
-    ]);
-    const tag = Animated.timing(tagOp, {
-      toValue: 0.93,
-      duration: 500,
-      useNativeDriver: true,
-      delay: 950,
-    });
-    mark.start();
-    tag.start();
-    return () => {
-      mark.stop();
-      tag.stop();
-    };
-  }, [mTy, mSc, mOp, tagOp]);
+    startedRef.current = Date.now();
+    mOp.value = withDelay(50, withTiming(1, { duration: 140 }));
+    mTy.value = withDelay(50, withSpring(0, MARK_SPRING));
+    mSc.value = withDelay(50, withSpring(1, MARK_SPRING));
+    tagOp.value = withDelay(950, withTiming(0.93, { duration: 500 }));
+  }, [mOp, mTy, mSc, tagOp]);
 
-  const markStyle = { transform: [{ translateY: mTy }, { scale: mSc }], opacity: mOp };
-  const tagStyle = { opacity: tagOp };
+  const markStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: mTy.value }, { scale: mSc.value }],
+    opacity: mOp.value,
+  }));
+  const tagStyle = useAnimatedStyle(() => ({ opacity: tagOp.value }));
 
   return (
     <View style={[styles.fill, { backgroundColor: t.bg }]}>
