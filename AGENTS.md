@@ -66,8 +66,52 @@ in → Login; onboarding incomplete → Welcome; pending OTP registration → OT
 ## Backend (gateway)
 
 Deployed at `https://gateway.maidora.co.ke` (Node.js 24 on cPanel/LiteSpeed,
-app root `/home/maidorac/maidora_app` on server19.tela-host.com). Endpoints:
-`/api/health`, `/api/db-health`, `/api/auth/register|verify-otp|resend-otp|login|me`.
+app root `/home/maidorac/maidora_app` on server19.tela-host.com). The gateway
+source is version-controlled in this repo under `backend/` (mirrored to the
+server root; `.env` lives only on the server — see `backend/.env.example`).
+
+Layout (restructured):
+
+```
+app.js                  entry — mounts routers
+src/config/index.js     env loading (dotenv) + typed config sections
+src/config/db.js        MySQL pool
+src/routes/health.js    /api/health (stable contract), /api/db-health
+src/routes/auth.js      /api/auth/register|verify-otp|resend-otp|login|me
+src/routes/payments.js  /api/payments/stk-push|:id|callback, /api/payments
+src/services/otp.js     hashed OTP storage, cooldowns/caps, SMS template
+src/services/sms.js     TalkSasa client
+src/services/mpesa.js   Safaricom Daraja: OAuth cache, STK Push, STK Query
+src/middleware/auth.js  requireAuth (JWT Bearer)
+src/utils/validate.js   validation (mirrors src/validation.js on mobile)
+sql/schema.sql          users, phone_otps, payments (idempotent, IF NOT EXISTS)
+```
+
+### M-Pesa (LIVE — Daraja production STK Push)
+
+- `POST /api/payments/stk-push` `{amount, phone?, purpose?}` (auth) → creates a
+  `payments` row, calls STK Push (`CustomerBuyGoodsOnline`, till `5511376`,
+  store `9393975`), returns `{paymentId, checkoutRequestId}`.
+- `GET /api/payments/:id?refresh=1` (auth) → status; while `pending` it
+  live-queries Daraja, so the flow completes even if the callback is missed.
+- `POST /api/payments/callback` (public) → Safaricom result receiver; ACKs
+  `{ResultCode:0}`. **Note:** the configured `MPESA_CALLBACK_URL` host
+  (`gateway.jobready.co.ke`) resolves to a different server — polling via
+  `refresh=1` is the working path until that URL points here.
+- Amounts are integers (KES), 1–500000. Testing charges real money — use KES 1.
+- Client: `PaymentScreen` (stack route `Payment`, entry card on Home) polls
+  every 3.5 s via `api.mpesaStatus`.
+
+### OTP autofill
+
+- Android: `expo-otp-autofill` (SMS Retriever API, zero SMS permissions).
+  Requires a **development build** (not Expo Go). The SMS must end with the
+  app's 11-char hash: set `OTP_APP_HASH` in the server `.env` (value from
+  `getAppHashAsync()` — logged/shown in dev on the OTP screen), then the
+  gateway appends it to every OTP SMS.
+- iOS: `textContentType="oneTimeCode"` on the hidden OTP input.
+- Universal fallback: clipboard "Paste code" button (`expo-clipboard`).
+
 SMS OTP via TalkSasa (`bulksms.talksasa.com/api/v3`). Password-reset email via
 nodemailer is planned (credentials pending) — the Forgot Password screen is a
 placeholder until then.

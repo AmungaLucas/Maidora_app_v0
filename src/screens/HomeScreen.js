@@ -64,6 +64,19 @@ export default function HomeScreen({ navigation }) {
         </Text>
       </View>
 
+      <Pressable style={styles.mpesaCard} onPress={() => navigation.navigate('Payment')}>
+        <View style={styles.mpesaIconWrap}>
+          <Ionicons name="phone-portrait-outline" size={20} color={colors.goldDark} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.mpesaTitle}>Try an M-Pesa payment</Text>
+          <Text style={styles.mpesaBody}>
+            Live STK Push is wired up. Send a KES 1 test payment to see the full flow.
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+      </Pressable>
+
       <View style={{ flex: 1 }} />
       <Text style={styles.footnote}>
         Marketplace features (listings, chat, hiring) are rolling out next. Your account role is
@@ -124,6 +137,28 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   tipText: { flex: 1, fontSize: 13.5, lineHeight: 20, color: colors.muted },
+  mpesaCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    borderLeftWidth: 4,
+    padding: 14,
+  },
+  mpesaIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.cream,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mpesaTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  mpesaBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
   footnote: {
     marginTop: 18,
     fontSize: 12.5,

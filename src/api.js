@@ -65,4 +65,13 @@ export const api = {
   login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
   // GET /auth/me — validates a stored token
   me: (token) => request('/auth/me', { token }),
+
+  // POST /payments/stk-push — { amount, phone?, purpose? } -> { paymentId, checkoutRequestId, message }
+  mpesaStkPush: (payload, token) =>
+    request('/payments/stk-push', { method: 'POST', body: payload, token, timeoutMs: 30000 }),
+  // GET /payments/:id — status; refresh=1 live-queries Daraja while pending
+  mpesaStatus: (id, token, refresh = false) =>
+    request(`/payments/${id}${refresh ? '?refresh=1' : ''}`, { token }),
+  // GET /payments — user's recent payments
+  mpesaList: (token) => request('/payments', { token }),
 };

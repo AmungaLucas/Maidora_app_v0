@@ -26,6 +26,7 @@ import OtpScreen from './src/screens/OtpScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import PaymentScreen from './src/screens/PaymentScreen';
 import { EmployerTabs, HousehelpTabs, tabsRouteFor } from './src/navigation/Tabs';
 
 const Stack = createNativeStackNavigator();
@@ -74,6 +75,7 @@ function RootNavigator() {
       <Stack.Screen name="EmployerTabs" component={EmployerTabs} />
       <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="Payment" component={PaymentScreen} />
     </Stack.Navigator>
   );
 }

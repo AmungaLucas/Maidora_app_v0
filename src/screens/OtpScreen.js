@@ -1,8 +1,17 @@
 // OTP verification — 6-digit SMS code.
 // Reads pendingReg from context so it survives an app restart (pending userId
 // stored at /register time). On success the session starts and role is locked.
+//
+// Autofill (three layers):
+//   1. Android — SMS Retriever via expo-otp-autofill (no SMS permissions;
+//      requires a dev build + the app hash appended to the SMS server-side).
+//   2. iOS     — oneTimeCode textContentType on the hidden input.
+//   3. Anywhere— "Paste code" button reads the clipboard (works in Expo Go).
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { getAppHashAsync, useOtpAutoFill } from 'expo-otp-autofill';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
 import { tabsRouteFor } from '../navigation/Tabs';
@@ -22,6 +31,23 @@ export default function OtpScreen({ navigation }) {
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const inputRef = useRef(null);
   const submittedRef = useRef('');
+
+  // Android SMS Retriever — the gateway appends the app hash (OTP_APP_HASH)
+  // to the OTP SMS, so this fires the moment the SMS lands. No-ops on iOS/web
+  // and inside Expo Go.
+  const { otp: smsOtp, clear: clearSmsOtp } = useOtpAutoFill({ length: CODE_LENGTH });
+  const [appHash, setAppHash] = useState('');
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    getAppHashAsync()
+      .then((h) => {
+        setAppHash(h || '');
+        if (__DEV__ && h) console.log('[maidora] SMS Retriever app hash:', h);
+      })
+      .catch(() => {});
+    return undefined;
+  }, []);
 
   useEffect(() => {
     if (!pendingReg) {
@@ -61,6 +87,28 @@ export default function OtpScreen({ navigation }) {
     if (clean.length === CODE_LENGTH && submittedRef.current !== clean) {
       submittedRef.current = clean;
       verify(clean);
+    }
+  };
+
+  // Feed the SMS-delivered code through the same onChange flow.
+  useEffect(() => {
+    if (smsOtp && smsOtp.replace(/\D/g, '').length === CODE_LENGTH) {
+      onChange(smsOtp);
+      clearSmsOtp();
+    }
+  }, [smsOtp]);
+
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      const digits = String(text || '').replace(/\D/g, '').slice(0, CODE_LENGTH);
+      if (digits.length === CODE_LENGTH) {
+        onChange(digits);
+      } else {
+        setError('No 6-digit code found in your clipboard.');
+      }
+    } catch {
+      setError('Could not read the clipboard.');
     }
   };
 
@@ -114,6 +162,12 @@ export default function OtpScreen({ navigation }) {
           autoFocus
           style={styles.hiddenInput}
         />
+        {code.length < CODE_LENGTH ? (
+          <Pressable style={styles.pasteRow} onPress={pasteFromClipboard} hitSlop={8}>
+            <Ionicons name="clipboard-outline" size={15} color={colors.goldDark} />
+            <Text style={styles.pasteText}>Paste code</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.hint}>Enter the code. It expires in 10 minutes.</Text>
       </View>
 
@@ -146,6 +200,10 @@ export default function OtpScreen({ navigation }) {
       >
         <Text style={styles.changeNumberText}>Wrong number? Start over</Text>
       </Pressable>
+
+      {__DEV__ && appHash ? (
+        <Text style={styles.devHash}>Dev · SMS hash: {appHash}</Text>
+      ) : null}
     </Screen>
   );
 }
@@ -169,6 +227,21 @@ const styles = StyleSheet.create({
   boxDigit: { fontSize: 24, fontWeight: '800', color: colors.ink },
   hiddenInput: { position: 'absolute', opacity: 0, height: 1, width: 1 },
   hint: { marginTop: 12, fontSize: 13, color: colors.muted, textAlign: 'center' },
+  pasteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    marginTop: 12,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: colors.gold,
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  pasteText: { color: colors.goldDark, fontSize: 13, fontWeight: '700' },
+  devHash: { marginTop: 10, fontSize: 11, color: colors.muted, textAlign: 'center' },
   resendRow: { alignItems: 'center', marginTop: 18 },
   resendWait: { color: colors.muted, fontSize: 14 },
   resendLink: { color: colors.forest, fontWeight: '800', fontSize: 15, textDecorationLine: 'underline' },
