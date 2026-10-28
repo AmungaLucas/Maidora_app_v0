@@ -15,7 +15,7 @@ export default function HomeScreen({ navigation }) {
   const isEmployer = user?.role !== 'househelp';
 
   return (
-    <Screen keyboard={false}>
+    <Screen keyboard={false} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <Image source={require('../../assets/splash-icon.png')} style={styles.logo} />
         <View style={{ flex: 1 }}>

@@ -21,6 +21,10 @@ const EmployerTabsNav = createBottomTabNavigator();
 export const tabsRouteFor = (user) =>
   user?.role === 'househelp' ? 'HousehelpTabs' : 'EmployerTabs';
 
+// Tab bar styling — deliberately NO custom height and NO position:'absolute'.
+// React Navigation v7 then automatically pads the bar by the system
+// navigation-bar/gesture inset (bottom), so the tabs are never hidden behind
+// the phone's own navigation bar on edge-to-edge Android or iOS home screens.
 const TAB_BAR = {
   headerShown: false,
   tabBarActiveTintColor: colors.brand,
@@ -29,11 +33,9 @@ const TAB_BAR = {
     backgroundColor: colors.card,
     borderTopColor: colors.line,
     borderTopWidth: 1,
-    height: 64,
     paddingTop: 6,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
-    position: 'absolute',
   },
   tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
 };

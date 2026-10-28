@@ -16,27 +16,40 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radius } from './theme';
 
-export function Screen({ children, scroll = true, keyboard = true, style }) {
+// Screen — safe-area wrapper used by every screen.
+//   scroll   : wrap children in a ScrollView (default) or a plain View
+//   keyboard : wrap in a KeyboardAvoidingView (iOS padding)
+//   edges    : safe-area edges applied (tab screens pass without 'bottom' —
+//              the bottom tab bar owns that inset)
+// Every path below applies the shared 24px horizontal padding so no screen
+// ever renders edge-to-edge, regardless of scroll/keyboard combination.
+export function Screen({ children, scroll = true, keyboard = true, style, edges }) {
   const Container = scroll ? ScrollView : View;
+  const contentStyle = scroll ? styles.scrollContent : styles.content;
+  const body = scroll ? (
+    <Container
+      contentContainerStyle={contentStyle}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      style={{ flex: 1 }}
+    >
+      {children}
+    </Container>
+  ) : (
+    <Container style={[{ flex: 1 }, contentStyle]}>{children}</Container>
+  );
   return (
-    <SafeAreaView style={[styles.screen, style]}>
+    <SafeAreaView style={[styles.screen, style]} edges={edges ?? ['top', 'left', 'right', 'bottom']}>
       <StatusBarDark />
       {keyboard ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={{ flex: 1 }}
         >
-          <Container
-            contentContainerStyle={scroll ? styles.scrollContent : undefined}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            style={{ flex: 1 }}
-          >
-            {children}
-          </Container>
+          {body}
         </KeyboardAvoidingView>
       ) : (
-        children
+        body
       )}
     </SafeAreaView>
   );
@@ -189,6 +202,7 @@ export function EmptyState({ icon, title, body, badge }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.cream },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 32 },
+  content: { flex: 1, paddingHorizontal: 24, paddingBottom: 24 },
   primaryButton: {
     backgroundColor: colors.forest,
     borderRadius: radius.md,

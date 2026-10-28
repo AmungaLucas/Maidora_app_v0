@@ -11,11 +11,12 @@
 // Navigation: React Navigation (native-stack). NOT expo-router.
 import React, { useEffect } from 'react';
 import { View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppProvider, useApp } from './src/context/AppContext';
+import { colors } from './src/theme';
 import { api } from './src/api';
 
 import SplashScreen from './src/screens/SplashScreen';
@@ -30,6 +31,21 @@ import PaymentScreen from './src/screens/PaymentScreen';
 import { EmployerTabs, HousehelpTabs, tabsRouteFor } from './src/navigation/Tabs';
 
 const Stack = createNativeStackNavigator();
+
+// Navigator theme aligned with the Maidora palette — keeps screen-transition
+// flashes and the area behind the rounded tab bar corners cream, not white.
+const navTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: colors.brand,
+    background: colors.cream,
+    card: colors.card,
+    text: colors.ink,
+    border: colors.line,
+    notification: colors.gold,
+  },
+};
 
 function RootNavigator() {
   const { booting, token, user, onboardingComplete, pendingReg, signOut } = useApp();
@@ -84,7 +100,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppProvider>
-        <NavigationContainer>
+        <NavigationContainer theme={navTheme}>
           <RootNavigator />
         </NavigationContainer>
       </AppProvider>

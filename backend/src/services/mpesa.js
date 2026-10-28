@@ -23,11 +23,24 @@ function mpesaError(message, provider) {
   return err;
 }
 
-function timestamp(d = new Date()) {
-  const p = (n) => String(n).padStart(2, '0');
+function timestamp() {
+  // Daraja requires the timestamp in Kenya time (UTC+3) — never rely on the
+  // server's local timezone (cPanel hosts commonly run UTC, which produces
+  // "invalid timestamp" rejections). Format: yyyyMMddHHmmss.
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Nairobi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const get = (t) => parts.find((x) => x.type === t) || { value: '' };
   return (
-    `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
-    `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    `${get('year').value}${get('month').value}${get('day').value}` +
+    `${get('hour').value}${get('minute').value}${get('second').value}`
   );
 }
 

@@ -5,7 +5,7 @@ import { EmptyState, Screen, ScreenHeader } from '../ui';
 
 export default function MyJobsScreen() {
   return (
-    <Screen keyboard={false}>
+    <Screen keyboard={false} edges={['top', 'left', 'right']}>
       <ScreenHeader
         eyebrow="Employer · Hiring"
         title="My Jobs"

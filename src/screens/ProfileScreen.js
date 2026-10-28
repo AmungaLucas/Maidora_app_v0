@@ -17,7 +17,7 @@ export default function ProfileScreen({ navigation }) {
     .toUpperCase();
 
   return (
-    <Screen keyboard={false}>
+    <Screen keyboard={false} edges={['top', 'left', 'right']}>
       <ScreenHeader eyebrow="Account" title="Profile" />
 
       <View style={styles.identityCard}>
