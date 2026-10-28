@@ -1,41 +1,72 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+# Maidora Kenya — mobile app
 
-## Expo has changed — do not trust your training data
+Expo / React Native app for the Maidora Kenya two-sided marketplace
+("Trusted help for your household"), connecting households with house helps
+across Kenya. Brand palette: forest `#214E3B`, green `#7BC08B`, cream `#F7F3E9`.
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+## Stack decisions (do not violate)
 
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+- **Navigation: React Navigation** (`@react-navigation/native` + `@react-navigation/native-stack`).
+  We do NOT use expo-router file-based routing. Screens live in `src/screens/`,
+  the navigator and auth/onboarding gate live in `App.js`.
+- Expo SDK 58, React Native 0.88, React 19.3. No `ios/`/`android/` folders
+  (Continuous Native Generation) — never create or edit them by hand; configure
+  via `app.json` and config plugins.
+- State: React Context (`src/context/AppContext.js`) + AsyncStorage
+  (`src/storage.js`). No Redux/Zustand unless the team agrees first.
+- API: `src/api.js` talks to `https://gateway.maidora.co.ke/api` (the Node.js
+  gateway deployed on cPanel; see below).
 
 ## Commands
 
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
-
 ```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+npx expo install <package>   # ALWAYS use instead of npm add — resolves SDK-compatible versions
+npx expo start               # start the dev server (Expo Go on your phone)
+npx expo lint                # lint
+npx expo-doctor              # diagnose dependency/config issues
+npx expo install --fix       # fix incompatible package versions
 ```
 
-Run lint and typecheck before declaring any task done.
+Expo changes every SDK release — do not trust memory over the versioned docs:
+https://docs.expo.dev/versions/v58.0.0/
 
-## Navigation & Routing
+## App flow (implemented)
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+First install: Splash → Welcome → RoleSelect (Employer/Househelp) →
+Signup → OTP (SMS, 6 digits) → role-based Home.
 
-## Building with EAS
+Later launches: Splash → gate on stored state — signed in → Home; not signed
+in → Login; onboarding incomplete → Welcome; pending OTP registration → OTP.
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+### Rules baked into the code — keep them true
 
-## Rules
+- **Role is immutable after account creation.** No endpoint accepts a role
+  update; the only client surface is Settings → "Change my role" → explainer
+  sheet → manual review by the team.
+- Role before signup is a free param: RoleSelect pre-selects `currentRole`
+  when reached from the Signup "Change" link (chip: "Signing up as: X · Change").
+- Signup validation mirrors the server exactly (see `src/validation.js` vs
+  gateway `src/validate.js`): password ≥ 8 chars, valid email, Kenyan phone
+  (`07…`, `01…`, `+2547…`, `+2541…` → normalized to `+2547…`/`+2541…`).
+- The pending `userId` from `POST /auth/register` is persisted
+  (`@maidora/pendingRegistration`) so the OTP screen survives app restarts.
+- Primary buttons stay disabled until the form is valid — no dead-end API errors.
+- Referral entry is a collapsed text link ("Have a referral code?").
+- Terms/Privacy links sit directly above the Create Account button.
 
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+## Backend (gateway)
+
+Deployed at `https://gateway.maidora.co.ke` (Node.js 24 on cPanel/LiteSpeed,
+app root `/home/maidorac/maidora_app` on server19.tela-host.com). Endpoints:
+`/api/health`, `/api/db-health`, `/api/auth/register|verify-otp|resend-otp|login|me`.
+SMS OTP via TalkSasa (`bulksms.talksasa.com/api/v3`). Password-reset email via
+nodemailer is planned (credentials pending) — the Forgot Password screen is a
+placeholder until then.
+
+## Conventions
+
+- EAS for builds (`npx eas-cli`); OTA updates via `eas update` later.
+- After adding a library with native code, a development build is required:
+  `npx expo run:android|ios` or `eas build --profile development`.
+- Prefer recommended Expo modules over third-party libraries.
+- Brand tokens live in `src/theme.js` — never hardcode hex values in screens.
