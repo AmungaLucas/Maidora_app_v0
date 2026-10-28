@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
+import { tabsRouteFor } from '../navigation/Tabs';
 import { colors, radius } from '../theme';
 import { Banner, PrimaryButton, Screen } from '../ui';
 
@@ -43,7 +44,7 @@ export default function OtpScreen({ navigation }) {
       const res = await api.verifyOtp({ userId: pendingReg.userId, code: value });
       await setPendingReg(null);
       await signIn(res.token, res.user);
-      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      navigation.reset({ index: 0, routes: [{ name: tabsRouteFor(res.user) }] });
     } catch (e) {
       setCode('');
       submittedRef.current = '';

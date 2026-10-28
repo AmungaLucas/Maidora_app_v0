@@ -154,6 +154,38 @@ export function BottomSheetModal({ visible, onClose, children }) {
   );
 }
 
+export function ScreenHeader({ eyebrow, title, subtitle, right }) {
+  return (
+    <View style={styles.headerWrap}>
+      {eyebrow ? <Text style={styles.headerEyebrow}>{eyebrow}</Text> : null}
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>{title}</Text>
+          {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+        </View>
+        {right}
+      </View>
+    </View>
+  );
+}
+
+export function EmptyState({ icon, title, body, badge }) {
+  return (
+    <View style={styles.emptyWrap}>
+      <View style={styles.emptyIcon}>
+        <Ionicons name={icon} size={30} color={colors.brand} />
+      </View>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyBody}>{body}</Text>
+      {badge ? (
+        <View style={styles.emptyBadge}>
+          <Text style={styles.emptyBadgeText}>{badge}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.cream },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 32 },
@@ -231,4 +263,51 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 36,
   },
+  headerWrap: { marginTop: 18, marginBottom: 18 },
+  headerEyebrow: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: colors.goldDark,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerTitle: { fontSize: 24, fontWeight: '800', color: colors.ink },
+  headerSubtitle: { marginTop: 4, fontSize: 14, color: colors.muted, lineHeight: 20 },
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    minHeight: 320,
+  },
+  emptyIcon: {
+    width: 68,
+    height: 68,
+    borderRadius: 22,
+    backgroundColor: colors.brandSoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: colors.ink, textAlign: 'center' },
+  emptyBody: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.muted,
+    textAlign: 'center',
+    maxWidth: 300,
+  },
+  emptyBadge: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    backgroundColor: colors.white,
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  emptyBadgeText: { color: colors.goldDark, fontSize: 12.5, fontWeight: '700' },
 });

@@ -2,7 +2,9 @@
 
 Expo / React Native app for the Maidora Kenya two-sided marketplace
 ("Trusted help for your household"), connecting households with house helps
-across Kenya. Brand palette: forest `#214E3B`, green `#7BC08B`, cream `#F7F3E9`.
+across Kenya. Brand palette (`src/theme.js`): brand `#214E3B` (forest),
+brandSoft `#7BC08B` (fresh green), cream `#F7F3E9`, gold `#D6A64F`
+(hearts/highlights/footer), goldDark `#9A742D` (eyebrows & inline links).
 
 ## Stack decisions (do not violate)
 
@@ -33,10 +35,17 @@ https://docs.expo.dev/versions/v58.0.0/
 ## App flow (implemented)
 
 First install: Splash → Welcome → RoleSelect (Employer/Househelp) →
-Signup → OTP (SMS, 6 digits) → role-based Home.
+Signup → OTP (SMS, 6 digits) → role-based bottom tabs.
 
-Later launches: Splash → gate on stored state — signed in → Home; not signed
+Later launches: Splash → gate on stored state — signed in → tabs; not signed
 in → Login; onboarding incomplete → Welcome; pending OTP registration → OTP.
+
+### Bottom tabs (role-based)
+
+- Househelp: Home | Find Jobs | Applications | Chat | Profile
+- Employer: Home | My Jobs | Maids | Chats | Profile
+- Defined in `src/navigation/Tabs.js` (one `createBottomTabNavigator` per
+  role). `tabsRouteFor(user)` gives the root-stack route name.
 
 ### Rules baked into the code — keep them true
 

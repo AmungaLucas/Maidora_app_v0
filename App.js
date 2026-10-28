@@ -25,8 +25,8 @@ import SignupScreen from './src/screens/SignupScreen';
 import OtpScreen from './src/screens/OtpScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
-import HomeScreen from './src/screens/HomeScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import { EmployerTabs, HousehelpTabs, tabsRouteFor } from './src/navigation/Tabs';
 
 const Stack = createNativeStackNavigator();
 
@@ -56,7 +56,7 @@ function RootNavigator() {
 
   let initialRoute = 'Welcome';
   if (pendingReg) initialRoute = 'Otp';
-  else if (token && user) initialRoute = 'Home';
+  else if (token && user) initialRoute = tabsRouteFor(user);
   else if (onboardingComplete) initialRoute = 'Login';
 
   return (
@@ -71,7 +71,8 @@ function RootNavigator() {
       <Stack.Screen name="Otp" component={OtpScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="EmployerTabs" component={EmployerTabs} />
+      <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
   );
