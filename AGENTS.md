@@ -93,14 +93,35 @@ sql/schema.sql          users, phone_otps, payments (idempotent, IF NOT EXISTS)
   `payments` row, calls STK Push (`CustomerBuyGoodsOnline`, till `5511376`,
   store `9393975`), returns `{paymentId, checkoutRequestId}`.
 - `GET /api/payments/:id?refresh=1` (auth) → status; while `pending` it
-  live-queries Daraja, so the flow completes even if the callback is missed.
+  live-queries Daraja only after a 12s grace period, and only acts on
+  definitive codes (`0` success; `1`/`1032`/`1037` failed) — everything else
+  stays pending and the callback settles it, so the UI can never show
+  "failed" while the user is still keying their PIN.
 - `POST /api/payments/callback` (public) → Safaricom result receiver; ACKs
-  `{ResultCode:0}`. **Note:** the configured `MPESA_CALLBACK_URL` host
-  (`gateway.jobready.co.ke`) resolves to a different server — polling via
-  `refresh=1` is the working path until that URL points here.
+  `{ResultCode:0}`. `MPESA_CALLBACK_URL` = `https://gateway.maidora.co.ke/api/payments/callback`.
 - Amounts are integers (KES), 1–500000. Testing charges real money — use KES 1.
 - Client: `PaymentScreen` (stack route `Payment`, entry card on Home) polls
-  every 3.5 s via `api.mpesaStatus`.
+  every 4s for up to ~3 min (`MAX_POLLS=45`); after that the payment stays
+  pending with a "Keep Checking" action — never auto-flips to failed.
+  First verified live success: receipt `UJS6N01T1A` (KES 1).
+
+### Brand components (`src/components/brand/`)
+
+- `BrandMark` — exact 720×680 SVG paths (pillar p1, house strokes p2+p3,
+  gold seam p4). `react-native-svg`.
+- `BrandLoader` — radar / twinArcs / comet / sweep variants
+  (`react-native-reanimated`). Radar is the locked button/full-screen loader.
+- `BrandLockup` — mark + MAIDORA + tagline (Welcome screen).
+- `FullScreenLoader` — dark/light veil Modal with the radar loader
+  (used while the STK push is being sent).
+- `LoadingButton` — radar-in-button with success state; `PrimaryButton` in
+  `ui.js` mirrors it (loading radar + `success`/`loadingLabel` props).
+- `SplashScreen` — "Ping Letters" timeline (rings, mark spring, MAIDORA
+  letter spring, tagline fade). Presentational; `AppContext` holds booting
+  for `SPLASH_MIN_MS = 2600` so it always completes.
+- Offline UX: `useIsOffline()` + `OfflineNote` (NetInfo) render automatically
+  inside every `Screen`; `api.js` maps network failures to human messages
+  (`OFFLINE` / `TIMEOUT` codes).
 
 ### OTP autofill
 

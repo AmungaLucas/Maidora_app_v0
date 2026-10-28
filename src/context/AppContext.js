@@ -4,6 +4,10 @@ import { storage } from '../storage';
 
 const AppContext = createContext(null);
 
+// Minimum time the animated splash stays up (ms) so the "Ping Letters"
+// timeline always completes before the first real screen appears.
+const SPLASH_MIN_MS = 2600;
+
 export function AppProvider({ children }) {
   const [booting, setBooting] = useState(true);
   const [token, setToken] = useState(null);
@@ -13,6 +17,7 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     (async () => {
+      const startedAt = Date.now();
       try {
         const [t, u, onboarding, pending] = await Promise.all([
           storage.getToken(),
@@ -25,6 +30,9 @@ export function AppProvider({ children }) {
         setOnboardingComplete(onboarding);
         setPendingRegState(pending);
       } finally {
+        // Hold the splash until its intro animation has finished playing.
+        const remaining = SPLASH_MIN_MS - (Date.now() - startedAt);
+        if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
         setBooting(false);
       }
     })();

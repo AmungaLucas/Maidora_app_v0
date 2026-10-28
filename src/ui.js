@@ -1,5 +1,5 @@
 // Shared UI primitives for Maidora Kenya.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,8 +12,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import BrandLoader from './components/brand/BrandLoader';
 import { colors, radius } from './theme';
 
 // Screen — safe-area wrapper used by every screen.
@@ -24,6 +26,7 @@ import { colors, radius } from './theme';
 // Every path below applies the shared 24px horizontal padding so no screen
 // ever renders edge-to-edge, regardless of scroll/keyboard combination.
 export function Screen({ children, scroll = true, keyboard = true, style, edges }) {
+  const offline = useIsOffline();
   const Container = scroll ? ScrollView : View;
   const contentStyle = scroll ? styles.scrollContent : styles.content;
   const body = scroll ? (
@@ -41,6 +44,7 @@ export function Screen({ children, scroll = true, keyboard = true, style, edges 
   return (
     <SafeAreaView style={[styles.screen, style]} edges={edges ?? ['top', 'left', 'right', 'bottom']}>
       <StatusBarDark />
+      {offline ? <OfflineNote /> : null}
       {keyboard ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -60,23 +64,74 @@ function StatusBarDark() {
   return <StatusBar style="dark" />;
 }
 
-export function PrimaryButton({ title, onPress, disabled = false, loading = false, style }) {
-  const blocked = disabled || loading;
+// True when the device has no connection (Wi-Fi/data off or unreachable).
+// `isInternetReachable` null = unknown — never treated as offline.
+export function useIsOffline() {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const check = (s) =>
+      setOffline(Boolean(s) && (s.isConnected === false || s.isInternetReachable === false));
+    const sub = NetInfo.addEventListener(check);
+    NetInfo.fetch().then(check).catch(() => {});
+    return () => sub && sub();
+  }, []);
+  return offline;
+}
+
+export function OfflineNote() {
+  return (
+    <View style={styles.offlineNote}>
+      <Ionicons name="wifi-outline" size={16} color={colors.goldDark} />
+      <Text style={styles.offlineText}>
+        No internet connection — check your Wi-Fi or mobile data. Maidora will
+        reconnect automatically.
+      </Text>
+    </View>
+  );
+}
+
+export function PrimaryButton({
+  title,
+  onPress,
+  disabled = false,
+  loading = false,
+  success = false,
+  loadingLabel,
+  successLabel,
+  style,
+}) {
+  const blocked = disabled || loading || success;
+  const bg = success ? colors.brandSoft : colors.forest;
   return (
     <Pressable
       onPress={onPress}
       disabled={blocked}
       style={({ pressed }) => [
         styles.primaryButton,
-        blocked && styles.primaryButtonDisabled,
-        pressed && !blocked && styles.primaryButtonPressed,
+        { backgroundColor: bg },
+        blocked && !success && styles.primaryButtonDisabled,
+        pressed && !blocked && !success && styles.primaryButtonPressed,
         style,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={colors.white} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <BrandLoader
+            variant="radar"
+            size={22}
+            color={colors.brandSoftLight}
+            track="rgba(255,255,255,0.25)"
+          />
+          {loadingLabel ? (
+            <Text style={styles.primaryButtonTextSmall}>{loadingLabel}</Text>
+          ) : null}
+        </View>
       ) : (
-        <Text style={styles.primaryButtonText}>{title}</Text>
+        <Text
+          style={[styles.primaryButtonText, success && { color: colors.ink }]}
+        >
+          {success ? successLabel || title : title}
+        </Text>
       )}
     </Pressable>
   );
@@ -214,6 +269,20 @@ const styles = StyleSheet.create({
   primaryButtonDisabled: { backgroundColor: colors.green, opacity: 0.55 },
   primaryButtonPressed: { backgroundColor: colors.forestDark },
   primaryButtonText: { color: colors.white, fontSize: 17, fontWeight: '700' },
+  primaryButtonTextSmall: { color: colors.white, fontSize: 15, fontWeight: '700' },
+  offlineNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 4,
+  },
+  offlineText: { flex: 1, fontSize: 12.5, lineHeight: 17, color: colors.goldDark, fontWeight: '600' },
   secondaryButton: {
     borderRadius: radius.md,
     minHeight: 54,

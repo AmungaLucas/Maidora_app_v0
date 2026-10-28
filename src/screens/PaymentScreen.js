@@ -1,19 +1,26 @@
 // M-Pesa payment — live STK Push against the Daraja production gateway.
 // Flow: choose amount -> confirm phone -> "Send push" -> the prompt lands on
 // the phone -> user enters their M-Pesa PIN -> we poll status (the gateway
-// uses the Daraja query API when callbacks are missed) -> success shows the
-// M-Pesa receipt code.
+// uses the Daraja query API only after a short grace period, and only acts on
+// definitive result codes) -> success shows the M-Pesa receipt code.
+//
+// Timing: STK prompts regularly take 30-60s+ for the user to key their PIN,
+// so polling runs every 4s for up to ~3 minutes. When we stop auto-checking
+// the payment is left PENDING (never "failed") with a Keep Checking action.
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import BrandLoader from '../components/brand/BrandLoader';
+import FullScreenLoader from '../components/brand/FullScreenLoader';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
 import { colors, radius } from '../theme';
-import { Banner, PrimaryButton, Screen, ScreenHeader, TextField } from '../ui';
+import { Banner, PrimaryButton, SecondaryButton, Screen, ScreenHeader, TextField } from '../ui';
 
 const AMOUNTS = [1, 50, 100, 200, 500];
-const POLL_MS = 3500;
-const MAX_POLLS = 26; // ~90 seconds
+const POLL_MS = 4000;
+const MAX_POLLS = 45; // ~3 minutes of auto-checking
+const GRACE_POLLS = 3; // first ~12s: never query Daraja, just show "check your phone"
 
 export default function PaymentScreen({ navigation }) {
   const { user, token } = useApp();
@@ -23,36 +30,44 @@ export default function PaymentScreen({ navigation }) {
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const [payment, setPayment] = useState(null); // { id, status, mpesaReceipt, resultDesc, phone }
+  const [elapsed, setElapsed] = useState(0);
+  const [stopped, setStopped] = useState(false); // stopped auto-checking while still pending
   const pollRef = useRef({ timerId: null, n: 0 });
+  const elapsedRef = useRef(null);
 
-  // Stop polling when the screen unmounts.
-  useEffect(
-    () => () => {
-      if (pollRef.current.timerId) clearInterval(pollRef.current.timerId);
-    },
-    []
-  );
-
-  const startPolling = (paymentId) => {
+  const stopTimers = () => {
     if (pollRef.current.timerId) clearInterval(pollRef.current.timerId);
     pollRef.current = { timerId: null, n: 0 };
+    if (elapsedRef.current) clearInterval(elapsedRef.current);
+    elapsedRef.current = null;
+  };
+
+  // Stop polling when the screen unmounts.
+  useEffect(() => stopTimers, []);
+
+  const startPolling = (paymentId) => {
+    stopTimers();
+    setElapsed(0);
+    elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
     const tick = async () => {
       pollRef.current.n += 1;
       try {
         const res = await api.mpesaStatus(paymentId, token, true);
         if (res.payment) {
           setPayment(res.payment);
-          if (res.payment.status !== 'pending' || pollRef.current.n >= MAX_POLLS) {
-            clearInterval(pollRef.current.timerId);
-            pollRef.current.timerId = null;
+          if (res.payment.status !== 'pending') {
+            stopTimers();
+            setStopped(false);
+            return;
           }
         }
       } catch {
         // transient network error — keep polling until the cap
-        if (pollRef.current.n >= MAX_POLLS) {
-          clearInterval(pollRef.current.timerId);
-          pollRef.current.timerId = null;
-        }
+      }
+      if (pollRef.current.n >= MAX_POLLS) {
+        // Leave the payment pending — the M-Pesa prompt may still be waiting.
+        stopTimers();
+        setStopped(true);
       }
     };
     pollRef.current.timerId = setInterval(tick, POLL_MS);
@@ -83,9 +98,9 @@ export default function PaymentScreen({ navigation }) {
   };
 
   const reset = () => {
-    if (pollRef.current.timerId) clearInterval(pollRef.current.timerId);
-    pollRef.current = { timerId: null, n: 0 };
+    stopTimers();
     setPayment(null);
+    setStopped(false);
     setError('');
   };
 
@@ -93,6 +108,8 @@ export default function PaymentScreen({ navigation }) {
 
   return (
     <Screen>
+      <FullScreenLoader visible={starting} label="Sending push" theme="dark" />
+
       <ScreenHeader
         eyebrow="M-Pesa · Live"
         title="Pay with M-Pesa"
@@ -125,15 +142,35 @@ export default function PaymentScreen({ navigation }) {
         </View>
       ) : payment && pending ? (
         <View style={[styles.statusCard, { borderColor: colors.gold }]}>
-          <ActivityIndicator size="large" color={colors.brand} />
+          <BrandLoader variant="radar" size={92} color={colors.brandSoft} />
           <Text style={styles.statusTitle}>Check your phone</Text>
           <Text style={styles.statusBody}>
             An M-Pesa prompt for KES {amount} was sent to {payment.phone || phone}. Enter your
             M-Pesa PIN to approve it.
           </Text>
           <Text style={styles.statusHint}>
-            Waiting for confirmation — keep this screen open.
+            Waiting for confirmation · {elapsed}s{stopped ? '' : ' — keep this screen open'}
           </Text>
+          <Text style={styles.statusNote}>
+            Prompts can take a few seconds, and up to a minute on busy networks.
+          </Text>
+          {stopped ? (
+            <>
+              <Text style={styles.statusStopped}>
+                We stopped auto-checking. If you approved the payment, it may still have gone
+                through — check your M-Pesa messages.
+              </Text>
+              <PrimaryButton
+                title="Keep Checking"
+                onPress={() => {
+                  setStopped(false);
+                  startPolling(payment.id);
+                }}
+                style={{ marginTop: 16, alignSelf: 'stretch' }}
+              />
+              <SecondaryButton title="Back to Home" onPress={reset} style={{ marginTop: 10, alignSelf: 'stretch' }} />
+            </>
+          ) : null}
         </View>
       ) : (
         <>
@@ -165,10 +202,11 @@ export default function PaymentScreen({ navigation }) {
           />
 
           <PrimaryButton
-            title={starting ? 'Sending push…' : `Send STK Push · KES ${amount}`}
+            title={`Send STK Push · KES ${amount}`}
             onPress={start}
             disabled={starting}
             loading={starting}
+            loadingLabel="Sending push…"
           />
           <Text style={styles.footnote}>
             You will get a prompt from Safaricom asking you to enter your M-Pesa PIN. Nothing is
@@ -210,7 +248,22 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: 'center',
   },
-  statusHint: { marginTop: 12, fontSize: 12.5, color: colors.goldDark, fontWeight: '600' },
+  statusHint: { marginTop: 12, fontSize: 12.5, color: colors.goldDark, fontWeight: '700' },
+  statusNote: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.muted,
+    textAlign: 'center',
+  },
+  statusStopped: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.danger,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   receiptChip: {
     marginTop: 16,
     alignItems: 'center',

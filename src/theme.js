@@ -27,6 +27,35 @@ export const colors = {
 
 export const radius = { sm: 10, md: 14, lg: 20, pill: 999 };
 
+// Typeface map. No custom font files are bundled yet — values stay undefined
+// so styles fall back to the system font; pair with fontWeight where needed.
+// When we bundle a font (e.g. Plus Jakarta Sans), set the family names here.
+export const fonts = {
+  bold: undefined,
+  semiBold: undefined,
+  medium: undefined,
+};
+
+// Loader/radar tokens (BrandLoader, FullScreenLoader).
+export const brandSoftLight = '#B9E1C3';
+export const loaderTrack = 'rgba(33, 78, 59, 0.12)';
+
+// Animated splash themes (SplashScreen "Ping Letters").
+export const splashThemes = {
+  light: {
+    bg: colors.cream,
+    ring: 'rgba(33, 78, 59, 0.10)',
+    word: colors.brand,
+    tag: colors.goldDark,
+  },
+  dark: {
+    bg: colors.brandDark,
+    ring: 'rgba(247, 243, 233, 0.14)',
+    word: colors.cream,
+    tag: colors.brandSoft,
+  },
+};
+
 export const fontSizes = {
   h1: 28,
   h2: 22,

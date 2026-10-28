@@ -16,6 +16,19 @@ const router = express.Router();
 const MIN_AMOUNT = 1;
 const MAX_AMOUNT = 500000;
 
+// Don't live-query Daraja during the first seconds of a push — the STK query
+// only reports "being processed" then, and early quirks must never flip a
+// payment to failed before the user has even seen their PIN prompt.
+const GRACE_MS = 12000;
+
+// Query result codes that are DEFINITELY terminal failures:
+//   1    insufficient funds
+//   1032 cancelled by user
+//   1037 timed out / expired
+// Any other non-zero code stays pending — the Safaricom callback is the
+// source of truth for the remaining failure modes.
+const DEFINITIVE_FAILURE_CODES = new Set(['1', '1032', '1037']);
+
 function paymentView(p) {
   return {
     id: p.id,
@@ -121,31 +134,37 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       p.checkout_request_id &&
       mpesa.isConfigured()
     ) {
-      try {
-        const q = await mpesa.stkQuery({ checkoutRequestId: p.checkout_request_id });
-        live = q;
-        const rc = q.ResultCode === undefined || q.ResultCode === null ? null : String(q.ResultCode);
-        if (rc === '0') {
-          await pool.query(
-            "UPDATE payments SET status = 'success', result_code = 0, result_desc = ? WHERE id = ?",
-            [String(q.ResultDesc || 'The service request is processed successfully.').slice(0, 250), id]
-          );
-          p.status = 'success';
-          p.result_desc = q.ResultDesc;
-        } else if (rc !== null && rc !== '') {
-          // 1032 cancelled by user, 1037 timed out, 1 insufficient funds, ...
-          await pool.query(
-            "UPDATE payments SET status = 'failed', result_code = ?, result_desc = ? WHERE id = ?",
-            [Number(rc) || 0, String(q.ResultDesc || 'Payment failed.').slice(0, 250), id]
-          );
-          p.status = 'failed';
-          p.result_code = Number(rc) || 0;
-          p.result_desc = q.ResultDesc;
+      const createdMs = p.created_at ? new Date(p.created_at).getTime() : 0;
+      if (Date.now() - createdMs < GRACE_MS) {
+        live = { grace: true };
+      } else {
+        try {
+          const q = await mpesa.stkQuery({ checkoutRequestId: p.checkout_request_id });
+          live = q;
+          const rc = q.ResultCode === undefined || q.ResultCode === null ? null : String(q.ResultCode);
+          if (rc === '0') {
+            await pool.query(
+              "UPDATE payments SET status = 'success', result_code = 0, result_desc = ? WHERE id = ?",
+              [String(q.ResultDesc || 'The service request is processed successfully.').slice(0, 250), id]
+            );
+            p.status = 'success';
+            p.result_desc = q.ResultDesc;
+          } else if (rc !== null && DEFINITIVE_FAILURE_CODES.has(rc)) {
+            // 1032 cancelled by user, 1037 timed out, 1 insufficient funds.
+            await pool.query(
+              "UPDATE payments SET status = 'failed', result_code = ?, result_desc = ? WHERE id = ?",
+              [Number(rc) || 0, String(q.ResultDesc || 'Payment failed.').slice(0, 250), id]
+            );
+            p.status = 'failed';
+            p.result_code = Number(rc) || 0;
+            p.result_desc = q.ResultDesc;
+          }
+          // Any other outcome ("being processed", unknown codes) stays pending —
+          // the Safaricom callback will settle it authoritatively.
+        } catch (e) {
+          // Query hiccup (e.g. "The transaction is being processed") — stay pending.
+          live = { error: e.message };
         }
-        // rc null → "still processing" (no ResultCode yet) — stay pending.
-      } catch (e) {
-        // Query hiccup (e.g. "transaction is being processed") — stay pending.
-        live = { error: e.message };
       }
     }
 
@@ -182,7 +201,10 @@ router.post('/callback', async (req, res) => {
       );
       console.log(`[payments/callback] ${cb.CheckoutRequestID} -> ${status} ${items.MpesaReceiptNumber || ''}`);
     } else {
-      console.warn('[payments/callback] unrecognized payload');
+      console.warn(
+        '[payments/callback] unrecognized payload — top-level keys:',
+        Object.keys(req.body || {}).join(', ') || '(empty)'
+      );
     }
   } catch (e) {
     console.error('[payments/callback]', e.message);

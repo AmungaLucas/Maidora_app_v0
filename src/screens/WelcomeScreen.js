@@ -1,8 +1,9 @@
 // Welcome — first-install onboarding entry.
 import React from 'react';
-import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import BrandLockup from '../components/brand/BrandLockup';
 import { useApp } from '../context/AppContext';
-import { LINKS, colors, radius } from '../theme';
+import { LINKS, colors } from '../theme';
 import { PrimaryButton, Screen } from '../ui';
 
 export default function WelcomeScreen({ navigation }) {
@@ -17,9 +18,7 @@ export default function WelcomeScreen({ navigation }) {
   return (
     <Screen scroll={false} keyboard={false}>
       <View style={styles.body}>
-        <Image source={require('../../assets/splash-icon.png')} style={styles.logo} resizeMode="contain" />
-        <Text style={styles.title}>Maidora Kenya</Text>
-        <Text style={styles.tagline}>Trusted help for your household.</Text>
+        <BrandLockup markSize={118} wordSize={30} gap={18} />
         <Text style={styles.blurb}>
           A safe, verified marketplace connecting households with trusted house helps across
           Kenya — whether you are hiring or looking for work.
@@ -49,11 +48,8 @@ export default function WelcomeScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   body: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  logo: { width: 150, height: 140, marginBottom: 22 },
-  title: { fontSize: 30, fontWeight: '800', color: colors.forest },
-  tagline: { marginTop: 6, fontSize: 17, color: colors.ink, fontWeight: '600' },
   blurb: {
-    marginTop: 16,
+    marginTop: 26,
     textAlign: 'center',
     fontSize: 14.5,
     lineHeight: 22,

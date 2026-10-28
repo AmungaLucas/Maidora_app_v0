@@ -43,9 +43,23 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
   } catch (e) {
     if (e.name === 'AbortError') {
       throw new ApiError(
-        'The request timed out. Please check your connection and try again.',
+        'This is taking longer than usual. Check your connection and try again.',
         0,
         'TIMEOUT'
+      );
+    }
+    // Device is out of network/data coverage (Android: "Network request failed",
+    // iOS: "Network request failed" / "The Internet connection appears to be
+    // offline"). Surface a human message, never a raw stack-style error.
+    const msg = String((e && e.message) || '');
+    if (
+      e instanceof TypeError ||
+      /network request failed|failed to fetch|the internet connection|offline|not connected|no address|unreachable/i.test(msg)
+    ) {
+      throw new ApiError(
+        'You seem to be offline. Check your Wi-Fi or mobile data, then try again.',
+        0,
+        'OFFLINE'
       );
     }
     throw e;
