@@ -16,10 +16,24 @@ const router = express.Router();
 const MIN_AMOUNT = 1;
 const MAX_AMOUNT = 500000;
 
-// Don't live-query Daraja during the first seconds of a push — the STK query
-// only reports "being processed" then, and early quirks must never flip a
-// payment to failed before the user has even seen their PIN prompt.
-const GRACE_MS = 12000;
+// ── Settlement policy ────────────────────────────────────────────────────
+// The Safaricom CALLBACK is the single source of truth for settling a
+// payment. The STK query API is only an accelerator, because Daraja is
+// known to return misleading results for IN-FLIGHT transactions (e.g. 1032
+// "Request Cancelled by user" while the prompt is still travelling to the
+// phone — observed live at t+12s, before the prompt had even arrived).
+//
+//   0 … 45s      never query — the prompt may not have reached the phone
+//                yet; the callback (or nothing) settles in this window.
+//   45s … 150s   a query may only CONFIRM SUCCESS (rc=0). Failure codes are
+//                reported to the client as live info but the row stays
+//                pending — the callback remains authoritative.
+//   after 150s   the STK prompt has well and truly expired, so a
+//                definitive failure code finally closes the payment and
+//                rows are not left pending forever if a callback is lost.
+//   A late callback ALWAYS overrides the stored state (success included).
+const GRACE_MS = 45000;
+const SETTLE_MS = 150000;
 
 // Query result codes that are DEFINITELY terminal failures:
 //   1    insufficient funds
@@ -36,6 +50,7 @@ function paymentView(p) {
     amount: Number(p.amount),
     phone: p.phone,
     status: p.status,
+    resultCode: p.result_code === undefined || p.result_code === null ? null : Number(p.result_code),
     mpesaReceipt: p.mpesa_receipt || null,
     resultDesc: p.result_desc || null,
     checkoutRequestId: p.checkout_request_id || null,
@@ -135,29 +150,42 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       mpesa.isConfigured()
     ) {
       const createdMs = p.created_at ? new Date(p.created_at).getTime() : 0;
-      if (Date.now() - createdMs < GRACE_MS) {
-        live = { grace: true };
+      const ageMs = Date.now() - createdMs;
+      if (ageMs < GRACE_MS) {
+        // Prompt may still be travelling to the phone — never query now.
+        live = { grace: true, ageSeconds: Math.round(ageMs / 1000) };
       } else {
         try {
           const q = await mpesa.stkQuery({ checkoutRequestId: p.checkout_request_id });
-          live = q;
           const rc = q.ResultCode === undefined || q.ResultCode === null ? null : String(q.ResultCode);
+          live = { queried: true, resultCode: rc, resultDesc: q.ResultDesc || null };
           if (rc === '0') {
+            // Success straight from Daraja — settle immediately (guarded so a
+            // callback that just landed is never overwritten). The callback
+            // will follow with the M-Pesa receipt number and fill it in.
             await pool.query(
-              "UPDATE payments SET status = 'success', result_code = 0, result_desc = ? WHERE id = ?",
+              "UPDATE payments SET status = 'success', result_code = 0, result_desc = ? WHERE id = ? AND status = 'pending'",
               [String(q.ResultDesc || 'The service request is processed successfully.').slice(0, 250), id]
             );
             p.status = 'success';
             p.result_desc = q.ResultDesc;
           } else if (rc !== null && DEFINITIVE_FAILURE_CODES.has(rc)) {
-            // 1032 cancelled by user, 1037 timed out, 1 insufficient funds.
-            await pool.query(
-              "UPDATE payments SET status = 'failed', result_code = ?, result_desc = ? WHERE id = ?",
-              [Number(rc) || 0, String(q.ResultDesc || 'Payment failed.').slice(0, 250), id]
-            );
-            p.status = 'failed';
-            p.result_code = Number(rc) || 0;
-            p.result_desc = q.ResultDesc;
+            if (ageMs >= SETTLE_MS) {
+              // The prompt expired long ago (1032 cancelled, 1037 timed out,
+              // 1 insufficient funds) — safe to close the payment now.
+              await pool.query(
+                "UPDATE payments SET status = 'failed', result_code = ?, result_desc = ? WHERE id = ? AND status = 'pending'",
+                [Number(rc) || 0, String(q.ResultDesc || 'Payment failed.').slice(0, 250), id]
+              );
+              p.status = 'failed';
+              p.result_code = Number(rc) || 0;
+              p.result_desc = q.ResultDesc;
+            } else {
+              // In-flight quirk: Daraja sometimes reports 1032 for a
+              // transaction that is merely still awaiting a PIN. Trust the
+              // callback — do NOT fail yet, tell the client when we will.
+              live.settleIn = Math.max(0, Math.round((SETTLE_MS - ageMs) / 1000));
+            }
           }
           // Any other outcome ("being processed", unknown codes) stays pending —
           // the Safaricom callback will settle it authoritatively.
@@ -184,22 +212,30 @@ router.post('/callback', async (req, res) => {
       if (cb.CallbackMetadata && Array.isArray(cb.CallbackMetadata.Item)) {
         for (const it of cb.CallbackMetadata.Item) items[it.Name] = it.Value;
       }
-      const rc = String(cb.ResultCode);
-      const status = rc === '0' ? 'success' : 'failed';
-      await pool.query(
+      const rc = cb.ResultCode === undefined || cb.ResultCode === null ? null : Number(cb.ResultCode);
+      const status = rc === 0 ? 'success' : 'failed';
+      // Unconditional on purpose: the callback overrides any state the
+      // query path wrote (it is the authoritative result from Safaricom).
+      const [r] = await pool.query(
         `UPDATE payments
          SET status = ?, result_code = ?, result_desc = ?, mpesa_receipt = ?, raw_callback = ?
          WHERE checkout_request_id = ?`,
         [
           status,
-          cb.ResultCode === undefined ? null : Number(cb.ResultCode),
+          rc,
           String(cb.ResultDesc || '').slice(0, 250),
           items.MpesaReceiptNumber || null,
           JSON.stringify(req.body).slice(0, 4000),
           cb.CheckoutRequestID,
         ]
       );
-      console.log(`[payments/callback] ${cb.CheckoutRequestID} -> ${status} ${items.MpesaReceiptNumber || ''}`);
+      console.log(
+        `[payments/callback] ${cb.CheckoutRequestID} -> ${status} rc=${rc} ` +
+          `receipt=${items.MpesaReceiptNumber || '-'} rows=${r.affectedRows} "${String(cb.ResultDesc || '')}"`
+      );
+      if (!r.affectedRows) {
+        console.warn(`[payments/callback] no payment row matches ${cb.CheckoutRequestID}`);
+      }
     } else {
       console.warn(
         '[payments/callback] unrecognized payload — top-level keys:',
@@ -209,8 +245,16 @@ router.post('/callback', async (req, res) => {
   } catch (e) {
     console.error('[payments/callback]', e.message);
   }
-  // Always ACK so Safaricom does not retry.
-  return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+  // Always ACK so Safaricom does not retry. Both documented response
+  // conventions are included, so whichever shape their parser expects is
+  // present; the HTTP 200 + body tells Daraja the result was received and
+  // the transaction is fully processed on our side.
+  return res.json({
+    ResponseCode: '0',
+    ResponseDescription: 'Accepted',
+    ResultCode: 0,
+    ResultDesc: 'Accepted',
+  });
 });
 
 module.exports = router;

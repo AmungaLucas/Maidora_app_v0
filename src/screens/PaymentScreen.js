@@ -1,12 +1,15 @@
 // M-Pesa payment — live STK Push against the Daraja production gateway.
 // Flow: choose amount -> confirm phone -> "Send push" -> the prompt lands on
-// the phone -> user enters their M-Pesa PIN -> we poll status (the gateway
-// uses the Daraja query API only after a short grace period, and only acts on
-// definitive result codes) -> success shows the M-Pesa receipt code.
+// the phone -> user enters their M-Pesa PIN -> the SAFARICOM CALLBACK settles
+// the payment (source of truth; the gateway only uses the Daraja query API
+// to confirm success early, never to fail an in-flight prompt) -> success
+// shows the M-Pesa receipt code.
 //
 // Timing: STK prompts regularly take 30-60s+ for the user to key their PIN,
-// so polling runs every 4s for up to ~3 minutes. When we stop auto-checking
-// the payment is left PENDING (never "failed") with a Keep Checking action.
+// so polling runs every 4s for up to ~3.5 minutes, and a little longer after
+// success so the callback's receipt number lands on screen. When we stop
+// auto-checking the payment is left PENDING (never "failed") with a Keep
+// Checking action.
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,8 +22,24 @@ import { Banner, PrimaryButton, SecondaryButton, Screen, ScreenHeader, TextField
 
 const AMOUNTS = [1, 50, 100, 200, 500];
 const POLL_MS = 4000;
-const MAX_POLLS = 45; // ~3 minutes of auto-checking
-const GRACE_POLLS = 3; // first ~12s: never query Daraja, just show "check your phone"
+const MAX_POLLS = 52; // ~3.5 minutes of auto-checking
+const RECEIPT_EXTRA_POLLS = 8; // keep polling ~30s after success until the receipt lands
+
+// Daraja result codes -> human sentences (the raw ResultDesc reads like a log).
+const FRIENDLY_FAILURES = {
+  1: 'There was not enough M-Pesa balance to complete this payment. Top up and try again.',
+  1032: 'The payment request was cancelled before it was approved.',
+  1037: 'The request expired before a PIN was entered. Send a new push and approve it in time.',
+  2001: 'The PIN entered was not correct. Nothing was charged — please try again.',
+};
+
+function friendlyFailure(payment) {
+  if (payment && FRIENDLY_FAILURES[payment.resultCode]) return FRIENDLY_FAILURES[payment.resultCode];
+  return (
+    (payment && payment.resultDesc && payment.resultDesc.replace(/\.$/, '')) ||
+    'The payment could not be completed.'
+  );
+}
 
 export default function PaymentScreen({ navigation }) {
   const { user, token } = useApp();
@@ -51,20 +70,34 @@ export default function PaymentScreen({ navigation }) {
     elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
     const tick = async () => {
       pollRef.current.n += 1;
+      let keepGoing = true;
+      let stillPending = false;
       try {
         const res = await api.mpesaStatus(paymentId, token, true);
         if (res.payment) {
           setPayment(res.payment);
-          if (res.payment.status !== 'pending') {
-            stopTimers();
-            setStopped(false);
-            return;
+          if (res.payment.status === 'pending') {
+            stillPending = true;
+          } else if (
+            res.payment.status === 'success' &&
+            !res.payment.mpesaReceipt &&
+            pollRef.current.n < MAX_POLLS + RECEIPT_EXTRA_POLLS
+          ) {
+            // Settled, but the callback has not stored the receipt number yet
+            // — poll a little longer so it appears on screen.
+          } else {
+            keepGoing = false;
           }
         }
       } catch {
-        // transient network error — keep polling until the cap
+        stillPending = true; // transient network error — keep polling
       }
-      if (pollRef.current.n >= MAX_POLLS) {
+      if (!keepGoing) {
+        stopTimers();
+        setStopped(false);
+        return;
+      }
+      if (stillPending && pollRef.current.n >= MAX_POLLS) {
         // Leave the payment pending — the M-Pesa prompt may still be waiting.
         stopTimers();
         setStopped(true);
@@ -127,7 +160,7 @@ export default function PaymentScreen({ navigation }) {
           </Text>
           <View style={styles.receiptChip}>
             <Text style={styles.receiptLabel}>M-Pesa receipt</Text>
-            <Text style={styles.receiptValue}>{payment.mpesaReceipt || 'Pending receipt'}</Text>
+            <Text style={styles.receiptValue}>{payment.mpesaReceipt || 'Confirming…'}</Text>
           </View>
           <PrimaryButton title="Back to Home" onPress={() => navigation.goBack()} style={{ marginTop: 18 }} />
         </View>
@@ -135,8 +168,9 @@ export default function PaymentScreen({ navigation }) {
         <View style={[styles.statusCard, { borderColor: colors.danger }]}>
           <Ionicons name="close-circle" size={46} color={colors.danger} />
           <Text style={styles.statusTitle}>Payment not completed</Text>
-          <Text style={styles.statusBody}>
-            {payment.resultDesc || 'The payment could not be completed.'}
+          <Text style={styles.statusBody}>{friendlyFailure(payment)}</Text>
+          <Text style={styles.statusNote}>
+            Nothing is charged for unapproved requests. Send a new push whenever you are ready.
           </Text>
           <PrimaryButton title="Try Again" onPress={reset} style={{ marginTop: 18 }} />
         </View>
@@ -152,13 +186,14 @@ export default function PaymentScreen({ navigation }) {
             Waiting for confirmation · {elapsed}s{stopped ? '' : ' — keep this screen open'}
           </Text>
           <Text style={styles.statusNote}>
-            Prompts can take a few seconds, and up to a minute on busy networks.
+            The prompt can take a few seconds to reach your phone, and up to a minute on busy
+            networks. You have about 3 minutes to enter your PIN.
           </Text>
           {stopped ? (
             <>
               <Text style={styles.statusStopped}>
-                We stopped auto-checking. If you approved the payment, it may still have gone
-                through — check your M-Pesa messages.
+                We stopped auto-checking, but the payment is still open — if you approve the prompt,
+                it can still complete. Check your M-Pesa messages.
               </Text>
               <PrimaryButton
                 title="Keep Checking"
@@ -260,7 +295,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 13,
     lineHeight: 19,
-    color: colors.danger,
+    color: colors.goldDark,
     fontWeight: '600',
     textAlign: 'center',
   },
