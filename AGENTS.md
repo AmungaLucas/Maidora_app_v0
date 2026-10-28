@@ -147,3 +147,11 @@ placeholder until then.
   `npx expo run:android|ios` or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries.
 - Brand tokens live in `src/theme.js` — never hardcode hex values in screens.
+
+## Documentation (mandatory workflow)
+
+- `Maidora_kenya_Architecture.md` — the living architecture document (app +
+  gateway + infra + M-Pesa policy + traps + roadmap).
+- `WORKLOG.md` — dated per-session log, newest first, with commit hashes.
+- **Rule:** every session updates the worklog AND the affected sections of
+  the architecture doc, in the same commit/push. Neither may be left behind.
