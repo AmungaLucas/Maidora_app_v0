@@ -104,13 +104,16 @@ sql/schema.sql          users, phone_otps, payments (idempotent, IF NOT EXISTS)
 
 ### OTP autofill
 
-- Android: `expo-otp-autofill` (SMS Retriever API, zero SMS permissions).
-  Requires a **development build** (not Expo Go). The SMS must end with the
-  app's 11-char hash: set `OTP_APP_HASH` in the server `.env` (value from
-  `getAppHashAsync()` — logged/shown in dev on the OTP screen), then the
-  gateway appends it to every OTP SMS.
-- iOS: `textContentType="oneTimeCode"` on the hidden OTP input.
-- Universal fallback: clipboard "Paste code" button (`expo-clipboard`).
+- Shipped today (zero native modules — works in Expo Go):
+  - iOS: `textContentType="oneTimeCode"` on the hidden OTP input.
+  - Android 10+: `autoComplete="sms-otp"` (Gboard surfaces the incoming code).
+  - Universal fallback: clipboard "Paste code" button (`expo-clipboard`).
+- DEFERRED to tail-end of production: `expo-otp-autofill` (SMS Retriever API).
+  It is a **native module** — requires a custom development build, crashes
+  with `cannot find native module 'expootpautofill'` in Expo Go. When we do
+  the production build: re-add the package, get the 11-char app hash from
+  `getAppHashAsync()`, set `OTP_APP_HASH` in the server `.env` — the gateway
+  already appends it to every OTP SMS (`src/services/otp.js`).
 
 SMS OTP via TalkSasa (`bulksms.talksasa.com/api/v3`). Password-reset email via
 nodemailer is planned (credentials pending) — the Forgot Password screen is a

@@ -2,15 +2,16 @@
 // Reads pendingReg from context so it survives an app restart (pending userId
 // stored at /register time). On success the session starts and role is locked.
 //
-// Autofill (three layers):
-//   1. Android — SMS Retriever via expo-otp-autofill (no SMS permissions;
-//      requires a dev build + the app hash appended to the SMS server-side).
-//   2. iOS     — oneTimeCode textContentType on the hidden input.
-//   3. Anywhere— "Paste code" button reads the clipboard (works in Expo Go).
+// Autofill (zero native modules — works in Expo Go and any build):
+//   1. iOS     — textContentType="oneTimeCode" (keyboard suggests the SMS code)
+//   2. Android — autoComplete="sms-otp" (Gboard surfaces the code on Android 10+)
+//   3. Anywhere— "Paste code" button reads the clipboard
+// Full SMS Retriever auto-read (expo-otp-autofill) is DEFERRED to a later
+// production build — it needs a custom dev build (native module), which
+// crashed with "cannot find native module 'expootpautofill'" in Expo Go.
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { getAppHashAsync, useOtpAutoFill } from 'expo-otp-autofill';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
@@ -31,23 +32,6 @@ export default function OtpScreen({ navigation }) {
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const inputRef = useRef(null);
   const submittedRef = useRef('');
-
-  // Android SMS Retriever — the gateway appends the app hash (OTP_APP_HASH)
-  // to the OTP SMS, so this fires the moment the SMS lands. No-ops on iOS/web
-  // and inside Expo Go.
-  const { otp: smsOtp, clear: clearSmsOtp } = useOtpAutoFill({ length: CODE_LENGTH });
-  const [appHash, setAppHash] = useState('');
-
-  useEffect(() => {
-    if (Platform.OS !== 'android') return undefined;
-    getAppHashAsync()
-      .then((h) => {
-        setAppHash(h || '');
-        if (__DEV__ && h) console.log('[maidora] SMS Retriever app hash:', h);
-      })
-      .catch(() => {});
-    return undefined;
-  }, []);
 
   useEffect(() => {
     if (!pendingReg) {
@@ -89,14 +73,6 @@ export default function OtpScreen({ navigation }) {
       verify(clean);
     }
   };
-
-  // Feed the SMS-delivered code through the same onChange flow.
-  useEffect(() => {
-    if (smsOtp && smsOtp.replace(/\D/g, '').length === CODE_LENGTH) {
-      onChange(smsOtp);
-      clearSmsOtp();
-    }
-  }, [smsOtp]);
 
   const pasteFromClipboard = async () => {
     try {
@@ -200,10 +176,6 @@ export default function OtpScreen({ navigation }) {
       >
         <Text style={styles.changeNumberText}>Wrong number? Start over</Text>
       </Pressable>
-
-      {__DEV__ && appHash ? (
-        <Text style={styles.devHash}>Dev · SMS hash: {appHash}</Text>
-      ) : null}
     </Screen>
   );
 }
@@ -241,7 +213,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   pasteText: { color: colors.goldDark, fontSize: 13, fontWeight: '700' },
-  devHash: { marginTop: 10, fontSize: 11, color: colors.muted, textAlign: 'center' },
   resendRow: { alignItems: 'center', marginTop: 18 },
   resendWait: { color: colors.muted, fontSize: 14 },
   resendLink: { color: colors.forest, fontWeight: '800', fontSize: 15, textDecorationLine: 'underline' },
