@@ -6,6 +6,29 @@
 
 ---
 
+## 2026-10-29 — Build fix: root-level `babel-preset-expo` (Metro "transformFile" crash)
+
+Metro bundling broke with the misleading `TypeError: Cannot read properties of
+undefined (reading 'transformFile')` (`metro/src/Bundler.js:55`) — reproduced
+identically on the owner's Windows machine and this workspace, so it was a repo
+bug, not a local install problem. Metro's real error line
+(`"Failed to construct transformer:"`) appears earlier in the log and the
+underlying cause was **`Cannot find module 'babel-preset-expo'`**: the lockfile
+only carried a copy nested at `node_modules/expo/node_modules/`, which Babel's
+preset resolver (resolving `presets: ['babel-preset-expo']` from
+`babel.config.js` at the project root) cannot see. Expo templates list
+`babel-preset-expo` as a direct devDependency precisely to guarantee a
+root-level copy; this repo never had one.
+
+- **Fix**: added `babel-preset-expo@~58.0.21` (SDK-58 range, same as expo's own
+  spec) as a direct devDependency → installed at node_modules root; lockfile
+  updated.
+- **Verified**: `require.resolve('babel-preset-expo')` from project root OK;
+  full `npx expo export --platform android` succeeds (3.9 MB Hermes bundle,
+  all 8 KYC screens included).
+- Build infrastructure only — no feature, architecture-status, or spec-adoption
+  changes. Owner action: `git pull` → `npm install` → `npx expo start -c`.
+
 ## 2026-10-29 — KYC submission phase (§8): 8-step app flow + gateway API, deployed
 
 Full vertical slice for identity verification (MPS §33 consolidated by
