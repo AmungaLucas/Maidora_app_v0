@@ -1,7 +1,7 @@
 // Applications (Househelp) — track jobs you have applied for.
 import React from 'react';
-import { colors } from '../theme';
-import { EmptyState, Screen, ScreenHeader } from '../ui';
+import { colors } from '../../theme';
+import { EmptyState, Screen, ScreenHeader } from '../../ui';
 
 export default function ApplicationsScreen() {
   return (

@@ -3,12 +3,12 @@
 // the server ignores any role sent from this screen.
 import React, { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { api, ApiError } from '../api';
-import { useApp } from '../context/AppContext';
-import { captureCurrentLocation } from '../location';
-import { LINKS, colors, radius } from '../theme';
-import { validateSignup } from '../validation';
-import { Banner, PrimaryButton, Screen, TextField } from '../ui';
+import { api, ApiError } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { captureCurrentLocation } from '../../location';
+import { LINKS, colors, radius } from '../../theme';
+import { validateSignup } from '../../validation';
+import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
 
 export default function SignupScreen({ navigation }) {
   const { setPendingReg } = useApp();

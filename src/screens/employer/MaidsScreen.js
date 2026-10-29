@@ -1,7 +1,7 @@
 // Maids (Employer) — browse and discover verified house helps.
 import React from 'react';
-import { colors } from '../theme';
-import { EmptyState, Screen, ScreenHeader } from '../ui';
+import { colors } from '../../theme';
+import { EmptyState, Screen, ScreenHeader } from '../../ui';
 
 export default function MaidsScreen() {
   return (

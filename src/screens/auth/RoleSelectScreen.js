@@ -6,11 +6,11 @@
 //     (kept for direct navigation from Login's "Create an account").
 import React, { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { api } from '../api';
-import { useApp } from '../context/AppContext';
-import { tabsRouteFor } from '../navigation/Tabs';
-import { colors, radius } from '../theme';
-import { Banner, PrimaryButton, Screen } from '../ui';
+import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { tabsRouteFor } from '../../navigation/Tabs';
+import { colors, radius } from '../../theme';
+import { Banner, PrimaryButton, Screen } from '../../ui';
 
 const OPTIONS = [
   {

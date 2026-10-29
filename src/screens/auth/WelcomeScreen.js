@@ -3,10 +3,10 @@
 // straight to Signup (unified spec §3.2).
 import React from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import BrandLockup from '../components/brand/BrandLockup';
-import { useApp } from '../context/AppContext';
-import { LINKS, colors } from '../theme';
-import { PrimaryButton, Screen } from '../ui';
+import BrandLockup from '../../components/brand/BrandLockup';
+import { useApp } from '../../context/AppContext';
+import { LINKS, colors } from '../../theme';
+import { PrimaryButton, Screen } from '../../ui';
 
 export default function WelcomeScreen({ navigation }) {
   const { completeOnboarding } = useApp();

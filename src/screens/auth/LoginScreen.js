@@ -3,13 +3,13 @@
 // permission or a failed fix changes nothing — last known location stands).
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { api } from '../api';
-import { useApp } from '../context/AppContext';
-import { captureCurrentLocation } from '../location';
-import { tabsRouteFor } from '../navigation/Tabs';
-import { colors, radius } from '../theme';
-import { isValidEmail, isValidPhone } from '../validation';
-import { Banner, PrimaryButton, Screen, TextField } from '../ui';
+import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { captureCurrentLocation } from '../../location';
+import { tabsRouteFor } from '../../navigation/Tabs';
+import { colors, radius } from '../../theme';
+import { isValidEmail, isValidPhone } from '../../validation';
+import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
 
 export default function LoginScreen({ navigation }) {
   const { signIn, setPendingReg } = useApp();

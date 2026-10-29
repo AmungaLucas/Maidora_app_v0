@@ -3,9 +3,10 @@
 import React, { useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useApp } from '../context/AppContext';
-import { LINKS, ROLES, colors, radius } from '../theme';
-import { BottomSheetModal, Screen } from '../ui';
+import { useApp } from '../../context/AppContext';
+import { LINKS, ROLES, colors, radius } from '../../theme';
+import { BottomSheetModal, Screen } from '../../ui';
+import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 
 export default function SettingsScreen({ navigation }) {
   const { user, signOut } = useApp();
@@ -22,15 +23,22 @@ export default function SettingsScreen({ navigation }) {
 
   const logOut = () => {
     signOut();
-    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    navigation.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
   };
+
+  // Inside the Profile drawer → hamburger; root-stack copy → back arrow.
+  const inDrawer = typeof navigation.openDrawer === 'function';
 
   return (
     <Screen keyboard={false}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
-          <Ionicons name="arrow-back" size={24} color={colors.forest} />
-        </Pressable>
+        {inDrawer ? (
+          <DrawerMenuButton navigation={navigation} />
+        ) : (
+          <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+            <Ionicons name="arrow-back" size={24} color={colors.forest} />
+          </Pressable>
+        )}
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
 

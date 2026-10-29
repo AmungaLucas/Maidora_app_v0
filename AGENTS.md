@@ -8,9 +8,11 @@ brandSoft `#7BC08B` (fresh green), cream `#F7F3E9`, gold `#D6A64F`
 
 ## Stack decisions (do not violate)
 
-- **Navigation: React Navigation** (`@react-navigation/native` + `@react-navigation/native-stack`).
-  We do NOT use expo-router file-based routing. Screens live in `src/screens/`,
-  the navigator and auth/onboarding gate live in `App.js`.
+- **Navigation: React Navigation** (`@react-navigation/native` + `@react-navigation/native-stack` + bottom-tabs + drawer).
+  We do NOT use expo-router file-based routing. Screens live in `src/screens/`
+  organized by domain: `auth/ home/ maid/ employer/ chat/ profile/ payments/
+  settings/ verification/`. The root navigator + auth/onboarding gate live in
+  `App.js`; the Profile tab is a real drawer navigator (`src/navigation/ProfileDrawer.js`).
 - Expo SDK 58, React Native 0.88, React 19.3. No `ios/`/`android/` folders
   (Continuous Native Generation) — never create or edit them by hand; configure
   via `app.json` and config plugins.

@@ -1,17 +1,19 @@
 // Role-based bottom tab navigators.
 //   Househelp: Home | Find Jobs | Applications | Chat | Profile
 //   Employer:  Home | My Jobs  | Maids        | Chat | Profile
+// The Profile tab is a REAL React Navigation drawer (ProfileDrawer) holding
+// the account destinations: personal details, verification, payments, settings.
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-import HomeScreen from '../screens/HomeScreen';
-import FindJobsScreen from '../screens/FindJobsScreen';
-import ApplicationsScreen from '../screens/ApplicationsScreen';
-import MyJobsScreen from '../screens/MyJobsScreen';
-import MaidsScreen from '../screens/MaidsScreen';
-import ChatsScreen from '../screens/ChatsScreen';
-import ProfileScreen from '../screens/ProfileScreen';
+import HomeScreen from '../screens/home/HomeScreen';
+import FindJobsScreen from '../screens/maid/FindJobsScreen';
+import ApplicationsScreen from '../screens/maid/ApplicationsScreen';
+import MyJobsScreen from '../screens/employer/MyJobsScreen';
+import MaidsScreen from '../screens/employer/MaidsScreen';
+import ChatsScreen from '../screens/chat/ChatsScreen';
+import ProfileDrawer from './ProfileDrawer';
 import { colors, radius } from '../theme';
 
 const HousehelpTabsNav = createBottomTabNavigator();
@@ -69,7 +71,7 @@ export function HousehelpTabs() {
       />
       <HousehelpTabsNav.Screen
         name="ProfileTab"
-        component={ProfileScreen}
+        component={ProfileDrawer}
         options={{ title: 'Profile', tabBarIcon: ({ focused }) => icon('person', focused) }}
       />
     </HousehelpTabsNav.Navigator>
@@ -101,7 +103,7 @@ export function EmployerTabs() {
       />
       <EmployerTabsNav.Screen
         name="ProfileTab"
-        component={ProfileScreen}
+        component={ProfileDrawer}
         options={{ title: 'Profile', tabBarIcon: ({ focused }) => icon('person', focused) }}
       />
     </EmployerTabsNav.Navigator>

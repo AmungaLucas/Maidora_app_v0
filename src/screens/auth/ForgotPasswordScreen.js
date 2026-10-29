@@ -1,8 +1,8 @@
 // Forgot password — placeholder until email delivery (nodemailer) is switched on.
 import React from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
-import { LINKS, colors, radius } from '../theme';
-import { PrimaryButton, Screen } from '../ui';
+import { LINKS, colors, radius } from '../../theme';
+import { PrimaryButton, Screen } from '../../ui';
 
 export default function ForgotPasswordScreen({ navigation }) {
   return (

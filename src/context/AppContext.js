@@ -1,6 +1,14 @@
-// Global app state: session, onboarding flag, pending registration (OTP handoff).
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+// Global app state: session, onboarding flag, pending registration (OTP
+// handoff), and the shared §7 profile-completeness snapshot.
+//
+// Completeness lives HERE (not in the screens) so the Home banner updates
+// the instant a step is saved in the Profile wizard — no app restart, no
+// stale banner after navigating back. Screens may call refreshCompleteness()
+// (e.g. on focus) to re-sync with the server, and setProfileCompleteness()
+// directly with the server's response after each save.
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { storage } from '../storage';
+import { api } from '../api';
 
 const AppContext = createContext(null);
 
@@ -14,6 +22,7 @@ export function AppProvider({ children }) {
   const [user, setUser] = useState(null);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [pendingReg, setPendingRegState] = useState(null);
+  const [profileCompleteness, setProfileCompleteness] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -38,6 +47,26 @@ export function AppProvider({ children }) {
     })();
   }, []);
 
+  // Re-sync §7 completeness from the gateway (role-aware GET /profile).
+  // Silent on failure — the banner keeps whatever it last knew.
+  const refreshCompleteness = useCallback(async () => {
+    if (!token || !user?.role) {
+      setProfileCompleteness(null);
+      return;
+    }
+    try {
+      const res = await api.getProfile(token);
+      setProfileCompleteness(res.completeness || null);
+    } catch {
+      // Non-blocking: offline / transient errors keep the last snapshot.
+    }
+  }, [token, user?.role]);
+
+  // Fetch once per session/user change; screens re-call it on focus.
+  useEffect(() => {
+    refreshCompleteness();
+  }, [refreshCompleteness]);
+
   const value = useMemo(
     () => ({
       booting,
@@ -45,6 +74,9 @@ export function AppProvider({ children }) {
       user,
       onboardingComplete,
       pendingReg,
+      profileCompleteness,
+      setProfileCompleteness,
+      refreshCompleteness,
       signIn: async (newToken, newUser) => {
         await storage.saveSession(newToken, newUser);
         await storage.clearPendingReg();
@@ -56,6 +88,7 @@ export function AppProvider({ children }) {
         await storage.clearSession();
         setToken(null);
         setUser(null);
+        setProfileCompleteness(null);
       },
       completeOnboarding: async () => {
         await storage.setOnboarding(true);
@@ -77,7 +110,7 @@ export function AppProvider({ children }) {
         setUser(next);
       },
     }),
-    [booting, token, user, onboardingComplete, pendingReg]
+    [booting, token, user, onboardingComplete, pendingReg, profileCompleteness, refreshCompleteness]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

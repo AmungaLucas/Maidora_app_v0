@@ -14,11 +14,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../api';
-import { useApp } from '../context/AppContext';
-import { tabsRouteFor } from '../navigation/Tabs';
-import { colors, radius } from '../theme';
-import { Banner, PrimaryButton, Screen } from '../ui';
+import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { tabsRouteFor } from '../../navigation/Tabs';
+import { colors, radius } from '../../theme';
+import { Banner, PrimaryButton, Screen } from '../../ui';
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 60;

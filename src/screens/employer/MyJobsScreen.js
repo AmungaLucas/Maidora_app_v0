@@ -1,7 +1,7 @@
 // My Jobs (Employer) — manage your posted jobs and hires.
 import React from 'react';
-import { colors } from '../theme';
-import { EmptyState, Screen, ScreenHeader } from '../ui';
+import { colors } from '../../theme';
+import { EmptyState, Screen, ScreenHeader } from '../../ui';
 
 export default function MyJobsScreen() {
   return (

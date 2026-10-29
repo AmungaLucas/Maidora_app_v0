@@ -1,7 +1,7 @@
 // Chats — conversations between households and house helps (shared by both roles).
 import React from 'react';
-import { colors } from '../theme';
-import { EmptyState, Screen, ScreenHeader } from '../ui';
+import { colors } from '../../theme';
+import { EmptyState, Screen, ScreenHeader } from '../../ui';
 
 export default function ChatsScreen() {
   return (

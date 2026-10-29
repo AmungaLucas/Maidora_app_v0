@@ -9,34 +9,37 @@
 //                     onboarding seen       -> Welcome (first-run only)
 //                     pending OTP registration -> OTP (survives restart)
 //
-// Navigation: React Navigation (native-stack). NOT expo-router.
+// Navigation: React Navigation (native-stack + bottom-tabs + drawer).
+// NOT expo-router. The drawer lives inside the Profile tab (ProfileDrawer).
+import 'react-native-gesture-handler';
 import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppProvider, useApp } from './src/context/AppContext';
 import { colors } from './src/theme';
 import { api } from './src/api';
 
-import SplashScreen from './src/screens/SplashScreen';
-import WelcomeScreen from './src/screens/WelcomeScreen';
-import RoleSelectScreen from './src/screens/RoleSelectScreen';
-import SignupScreen from './src/screens/SignupScreen';
-import OtpScreen from './src/screens/OtpScreen';
-import LoginScreen from './src/screens/LoginScreen';
-import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
-import SettingsScreen from './src/screens/SettingsScreen';
-import PaymentScreen from './src/screens/PaymentScreen';
-import KycIntroScreen from './src/screens/kyc/KycIntroScreen';
-import KycPersonalScreen from './src/screens/kyc/KycPersonalScreen';
-import KycDocTypeScreen from './src/screens/kyc/KycDocTypeScreen';
-import KycDocFrontScreen from './src/screens/kyc/KycDocFrontScreen';
-import KycDocBackScreen from './src/screens/kyc/KycDocBackScreen';
-import KycSelfieScreen from './src/screens/kyc/KycSelfieScreen';
-import KycReviewScreen from './src/screens/kyc/KycReviewScreen';
-import KycDoneScreen from './src/screens/kyc/KycDoneScreen';
+import SplashScreen from './src/screens/auth/SplashScreen';
+import WelcomeScreen from './src/screens/auth/WelcomeScreen';
+import RoleSelectScreen from './src/screens/auth/RoleSelectScreen';
+import SignupScreen from './src/screens/auth/SignupScreen';
+import OtpScreen from './src/screens/auth/OtpScreen';
+import LoginScreen from './src/screens/auth/LoginScreen';
+import ForgotPasswordScreen from './src/screens/auth/ForgotPasswordScreen';
+import SettingsScreen from './src/screens/settings/SettingsScreen';
+import PaymentScreen from './src/screens/payments/PaymentScreen';
+import KycIntroScreen from './src/screens/verification/KycIntroScreen';
+import KycPersonalScreen from './src/screens/verification/KycPersonalScreen';
+import KycDocTypeScreen from './src/screens/verification/KycDocTypeScreen';
+import KycDocFrontScreen from './src/screens/verification/KycDocFrontScreen';
+import KycDocBackScreen from './src/screens/verification/KycDocBackScreen';
+import KycSelfieScreen from './src/screens/verification/KycSelfieScreen';
+import KycReviewScreen from './src/screens/verification/KycReviewScreen';
+import KycDoneScreen from './src/screens/verification/KycDoneScreen';
 import { EmployerTabs, HousehelpTabs, tabsRouteFor } from './src/navigation/Tabs';
 
 const Stack = createNativeStackNavigator();
@@ -109,7 +112,9 @@ function RootNavigator() {
       <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="Payment" component={PaymentScreen} />
-      {/* KYC / trust badge (§8) — househelp-facing 8-step flow */}
+      {/* KYC / trust badge (§8) — root-stack copies also open from the Home
+          banner; inside the Profile drawer the same screens render with a
+          hamburger header instead (ProfileDrawer). */}
       <Stack.Screen name="KycIntro" component={KycIntroScreen} />
       <Stack.Screen name="KycPersonal" component={KycPersonalScreen} />
       <Stack.Screen name="KycDocType" component={KycDocTypeScreen} />
@@ -124,12 +129,14 @@ function RootNavigator() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AppProvider>
-        <NavigationContainer theme={navTheme}>
-          <RootNavigator />
-        </NavigationContainer>
-      </AppProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AppProvider>
+          <NavigationContainer theme={navTheme}>
+            <RootNavigator />
+          </NavigationContainer>
+        </AppProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

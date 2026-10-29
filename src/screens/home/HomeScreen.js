@@ -1,15 +1,18 @@
 // Home tab — shared by both roles, content adapts to user.role.
 // Banner order per spec §7 → §8: PROFILE COMPLETENESS first, verification
-// (Trust Badge) second — both roles. Completeness is fetched from the
-// role-aware GET /profile (maid: 6 checks, employer: 3 checks).
-import React, { useEffect, useState } from 'react';
+// (Trust Badge) second — both roles. Completeness comes from the SHARED
+// AppContext snapshot — the Profile wizard updates it on every save, so the
+// banner reacts instantly; a focus refetch re-syncs with the server.
+// Header: settings icon REMOVED (owner) — settings live in the Profile
+// drawer. The right slot is now the user's avatar, tapping to Profile.
+import React, { useMemo } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../api';
-import { useApp } from '../context/AppContext';
-import { ROLES, colors, radius } from '../theme';
-import { Screen } from '../ui';
-import { REASON_LABELS } from './kyc/kycShared';
+import { useFocusEffect } from '@react-navigation/native';
+import { useApp } from '../../context/AppContext';
+import { ROLES, colors, radius } from '../../theme';
+import { Screen } from '../../ui';
+import { REASON_LABELS } from '../verification/kycShared';
 
 function firstName(fullName) {
   return String(fullName || '').trim().split(/\s+/)[0] || 'there';
@@ -44,28 +47,28 @@ function kycBannerBody(user) {
 }
 
 export default function HomeScreen({ navigation }) {
-  const { user, token } = useApp();
+  const { user, token, profileCompleteness: completeness, refreshCompleteness } = useApp();
   const isEmployer = user?.role !== 'househelp';
-  const [completeness, setCompleteness] = useState(null);
 
-  // Profile completeness (both roles) — fetched non-blocking; the banner
-  // simply hides while it is unknown.
-  useEffect(() => {
-    if (!token || !user?.role) {
-      setCompleteness(null);
-      return undefined;
-    }
-    let live = true;
-    api
-      .getProfile(token)
-      .then((res) => {
-        if (live) setCompleteness(res.completeness || null);
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [token, user?.role]);
+  // Re-sync completeness every time Home regains focus (covers changes made
+  // in the Profile wizard via the shared context, plus cross-device edits).
+  useFocusEffect(
+    React.useCallback(() => {
+      if (token && user?.role) refreshCompleteness();
+    }, [token, user?.role, refreshCompleteness])
+  );
+
+  const initials = useMemo(
+    () =>
+      String(user?.fullName || 'M')
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((w) => w[0])
+        .join('')
+        .toUpperCase(),
+    [user?.fullName]
+  );
 
   const showCompletenessBanner =
     completeness && (completeness.done < completeness.total || completeness.total === 0);
@@ -73,13 +76,20 @@ export default function HomeScreen({ navigation }) {
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Image source={require('../../assets/splash-icon.png')} style={styles.logo} />
+        <Image source={require('../../../assets/splash-icon.png')} style={styles.logo} />
         <View style={{ flex: 1 }}>
           <Text style={styles.greeting}>Karibu, {firstName(user?.fullName)} 👋</Text>
           <Text style={styles.roleLine}>{ROLES[user?.role] || 'Member'} · Maidora Kenya</Text>
         </View>
-        <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={8}>
-          <Ionicons name="settings-outline" size={24} color={colors.brand} />
+        {/* User avatar → Profile (settings icon moved into the Profile drawer) */}
+        <Pressable
+          onPress={() => navigation.navigate('ProfileTab')}
+          hitSlop={8}
+          accessibilityLabel="Open my profile"
+        >
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
         </Pressable>
       </View>
 
@@ -181,7 +191,7 @@ export default function HomeScreen({ navigation }) {
       <View style={{ flex: 1 }} />
       <Text style={styles.footnote}>
         Marketplace features (listings, chat, hiring) are rolling out next. Your account role is
-        permanent — see Settings.
+        permanent — change requests live in Profile → Account settings.
       </Text>
     </Screen>
   );
@@ -195,6 +205,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   logo: { width: 46, height: 43, borderRadius: 10 },
+  avatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.brandSoftBg,
+    borderWidth: 2,
+    borderColor: colors.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { fontSize: 15, fontWeight: '800', color: colors.brand },
   greeting: { fontSize: 19, fontWeight: '800', color: colors.ink },
   roleLine: { marginTop: 2, fontSize: 13, color: colors.muted },
   hero: {

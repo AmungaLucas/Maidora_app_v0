@@ -1,7 +1,7 @@
 // Find Jobs (Househelp) — placeholder until listings ship.
 import React from 'react';
-import { colors } from '../theme';
-import { EmptyState, Screen, ScreenHeader } from '../ui';
+import { colors } from '../../theme';
+import { EmptyState, Screen, ScreenHeader } from '../../ui';
 
 export default function FindJobsScreen() {
   return (

@@ -142,23 +142,29 @@ async function loadProfile(userId) {
   return row || null;
 }
 
+// PARTIAL field validation for the §7 wizard (one step = one PUT). Only the
+// keys PRESENT in the body are validated and written — matching the employer
+// side and the spec's non-blocking principle. Full completeness is still
+// derived (and reported) at read time; the wizard simply saves step by step.
 function validateProfilePayload(b) {
   const errors = {};
   const values = {};
 
   const dob = String(b.dateOfBirth || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
-    errors.dateOfBirth = 'Enter your date of birth as YYYY-MM-DD.';
-  } else {
-    const d = new Date(`${dob}T00:00:00Z`);
-    if (Number.isNaN(d.getTime())) {
-      errors.dateOfBirth = 'That date does not exist. Check the day and month.';
+  if (b.dateOfBirth !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+      errors.dateOfBirth = 'Enter your date of birth as YYYY-MM-DD.';
     } else {
-      const age = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
-      if (age < 16 || age > 80) {
-        errors.dateOfBirth = 'Age must be between 16 and 80 years.';
+      const d = new Date(`${dob}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) {
+        errors.dateOfBirth = 'That date does not exist. Check the day and month.';
       } else {
-        values.date_of_birth = dob;
+        const age = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
+        if (age < 16 || age > 80) {
+          errors.dateOfBirth = 'Age must be between 16 and 80 years.';
+        } else {
+          values.date_of_birth = dob;
+        }
       }
     }
   }
@@ -168,29 +174,35 @@ function validateProfilePayload(b) {
     else values.gender = b.gender;
   }
 
-  let langs = b.languages;
-  if (!Array.isArray(langs) || langs.length === 0) {
-    errors.languages = 'Pick at least one language you speak.';
-  } else {
-    langs = langs
-      .map((l) => String(l).trim().slice(0, 24))
-      .filter(Boolean)
-      .slice(0, 8);
-    if (langs.length === 0) errors.languages = 'Pick at least one language you speak.';
-    else values.languages = JSON.stringify(langs);
+  if (b.languages !== undefined) {
+    let langs = b.languages;
+    if (!Array.isArray(langs) || langs.length === 0) {
+      errors.languages = 'Pick at least one language you speak.';
+    } else {
+      langs = langs
+        .map((l) => String(l).trim().slice(0, 24))
+        .filter(Boolean)
+        .slice(0, 8);
+      if (langs.length === 0) errors.languages = 'Pick at least one language you speak.';
+      else values.languages = JSON.stringify(langs);
+    }
   }
 
-  if (!JOB_TYPES.includes(b.jobType)) {
-    errors.jobType = 'Choose the type of work you want.';
-  } else {
-    values.job_type = b.jobType;
+  if (b.jobType !== undefined) {
+    if (!JOB_TYPES.includes(b.jobType)) {
+      errors.jobType = 'Choose the type of work you want.';
+    } else {
+      values.job_type = b.jobType;
+    }
   }
 
-  const yrs = Number(b.yearsExperience);
-  if (!Number.isInteger(yrs) || yrs < 0 || yrs > 50) {
-    errors.yearsExperience = 'Years of experience must be a number between 0 and 50.';
-  } else {
-    values.years_experience = yrs;
+  if (b.yearsExperience !== undefined && b.yearsExperience !== null && b.yearsExperience !== '') {
+    const yrs = Number(b.yearsExperience);
+    if (!Number.isInteger(yrs) || yrs < 0 || yrs > 50) {
+      errors.yearsExperience = 'Years of experience must be a number between 0 and 50.';
+    } else {
+      values.years_experience = yrs;
+    }
   }
 
   // expectedSalary is the v4 API name for the wage_expectation column; the
@@ -211,23 +223,24 @@ function validateProfilePayload(b) {
     else values.bio = bio;
   }
 
+  const nokProvided = b.nextOfKin !== undefined;
   const nok = b.nextOfKin && typeof b.nextOfKin === 'object' ? b.nextOfKin : {};
   const nokName = String(nok.name || '').trim();
-  if (nokName.length < 3 || nokName.length > 120) {
+  if (nokProvided && (nokName.length < 3 || nokName.length > 120)) {
     errors.nextOfKinName = "Enter your next of kin's full name.";
-  } else {
+  } else if (nokName) {
     values.next_of_kin_name = nokName;
   }
   const nokPhone = normalizePhone(nok.phone);
-  if (!nokPhone) {
+  if (nokProvided && !nokPhone) {
     errors.nextOfKinPhone = "Enter your next of kin's Kenyan phone number.";
-  } else {
+  } else if (nokPhone) {
     values.next_of_kin_phone = nokPhone;
   }
   const nokRel = String(nok.relationship || '').trim();
-  if (nokRel.length < 2 || nokRel.length > 48) {
+  if (nokProvided && (nokRel.length < 2 || nokRel.length > 48)) {
     errors.nextOfKinRelationship = 'Relationship, e.g. sister, uncle, guardian.';
-  } else {
+  } else if (nokRel) {
     values.next_of_kin_relationship = nokRel;
   }
 
@@ -292,6 +305,11 @@ router.put('/', requireAuth, async (req, res, next) => {
     if (Object.keys(errors).length) {
       const first = Object.keys(errors)[0];
       return res.status(400).json({ message: errors[first], errors, field: first });
+    }
+    if (!Object.keys(values).length) {
+      return res.status(400).json({
+        message: 'Nothing to save — pick a step and fill it in first.',
+      });
     }
 
     await pool.query(

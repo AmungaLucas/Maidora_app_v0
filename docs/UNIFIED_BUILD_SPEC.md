@@ -21,7 +21,7 @@
 | §4 Data model | ✅ v2 | `sql/schema.sql`, `sql/migrate_v2.js` |
 | §5 Verification gate | ✅ | `requireVerified` middleware (gates services) |
 | §6 Location | ✅ (login update) | `LoginScreen.js` + `sanitizeLoginLocation` |
-| §7 Profile completeness | ✅ BOTH roles (v4) | `maid_profiles` + `employer_profiles`, role-aware `GET/PUT /api/profile`, ProfileScreen + HomeScreen banner (first) |
+| §7 Profile completeness | ✅ BOTH roles (v4 + wizard) | `maid_profiles` + `employer_profiles`, role-aware `GET/PUT /api/profile` (partial per-step saves), MULTISTEP `CompletenessWizard` + HomeScreen banner (first, instant via AppContext) |
 | §8 KYC / trust badge | 🟡 submission live (2026-10-29) | 8-step app flow + `src/routes/kyc.js` (draft/images/submit); review tooling next |
 | §9 Free applications/paywall | ⏳ | needs jobs/applications first |
 | §10 Visibility decay | ⏳ | `last_active_at` collected; ranking comes with search |
@@ -190,6 +190,12 @@ If an API/UI needs a single display status, derive it at read time.
 - **DOB input:** 3-step picker popup (year → month → day) in Profile and KYC personal steps.
 - **Employer:** new `employer_profiles` table — **household size (1–30), number of children (0–20), monthly budget (KES)** — 3 completeness checks; partial saves allowed.
 - **Email verification UI:** tapping "Email unverified" opens a sheet with a prefilled **editable** email → `POST /auth/update-email` (clears `email_verified_at`, 409 on duplicates) → SMTP 6-digit code → verified.
+
+### §7.2 Built additions (wizard, 2026-10-29) — owner follow-up
+- **Multistep wizard** (`src/screens/profile/CompletenessWizard.js`): maid 6 steps (DOB · languages · job type · experience & salary · about yourself · next of kin), employer 3 steps (household size · children · budget). Progress dots, opens at the FIRST incomplete step, **one step = one partial `PUT /profile`** — househelp validation is now partial like the employer side (empty body → 400). Closing mid-way keeps saved steps (non-blocking preserved).
+- **Instant banner:** §7 completeness lives in `AppContext` — every step save updates the Home banner immediately (plus `useFocusEffect` refetch).
+- **Drawer navigation:** the Profile tab is a REAL `@react-navigation/drawer` (ProfileMain · Verification · Payments · Settings; hamburger + swipe). Settings icon removed from Home header — replaced by the user's avatar → Profile.
+- **Screen folders (owner):** `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`.
 
 ---
 

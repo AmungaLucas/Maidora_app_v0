@@ -6,6 +6,54 @@
 
 ---
 
+## 2026-10-29 — Wizard + drawer + file restructure: §7 multistep, real drawer nav, screens organized
+
+Owner follow-up batch after using the v4 profile build: banner freshness,
+Home header avatar, settings moved into Profile, REAL React Navigation drawer,
+proper screen folders, and a multistep completeness flow. **Live E2E 16/16 on
+the gateway (`scripts/deploy_profile_wizard.py`); `expo export` bundle green
+(4.3 MB hbc, drawer included).**
+
+- **Instant banner (owner bug report)** — §7 completeness moved into
+  `AppContext` (`profileCompleteness` + `setProfileCompleteness` +
+  `refreshCompleteness`). The wizard pushes the server's fresh completeness
+  on EVERY step save → the Home banner updates immediately; no app restart.
+  `HomeScreen` additionally refetches via `useFocusEffect` (covers
+  cross-device edits).
+- **Home header**: settings icon REMOVED; right slot is now the user's
+  initials avatar (gold ring) → taps to Profile. Profile photo upload is a
+  separate future feature (server `photo_url` already reserved).
+- **Real drawer navigation** — new `src/navigation/ProfileDrawer.js`
+  (`@react-navigation/drawer` 7.14 + `react-native-gesture-handler` 3.3 via
+  `expo install`; reanimated 4 already present; `GestureHandlerRootView` +
+  RNGH entry import added). The Profile tab is a drawer navigator with
+  screens: ProfileMain · Verification (KycIntro) · Payments · Settings —
+  custom branded drawer content (identity header, active highlight, Log out
+  via `resetRoot`). The in-house `AppDrawer` modal was deleted. Drawer
+  screens use `DrawerMenuButton` (hamburger renders only when inside the
+  drawer; root-stack copies keep back headers). Root stack keeps
+  Settings/Payment/KycIntro registered for Home-banner deep links.
+- **Multistep §7 wizard** — `src/screens/profile/CompletenessWizard.js`:
+  househelp 6 steps (DOB · languages · job type · experience & salary ·
+  about yourself · next of kin), employer 3 steps (household size ·
+  children · monthly budget). Progress dots (✅ per completed step), opens
+  at the FIRST incomplete step, per-step partial `PUT /profile`, Save &
+  continue / Save & finish, closing mid-way keeps saved steps.
+- **Backend (deployed)** — `PUT /api/profile` (househelp) validation is now
+  PARTIAL: only keys present in the body are validated/written (mirrors the
+  employer side + spec §7 non-blocking principle); empty body → 400
+  "Nothing to save". Full-payload saves unchanged (older app builds keep
+  working). Backup `profile.js.<ts>.bak` → upload → restart → 16/16 E2E:
+  partial languages-only PUT 200 1/6, nextOfKin-only 200 2/6, empty 400,
+  bad yearsExperience 400, full 6/6, employer partial 1/3 → 3/3.
+- **File-system restructure (owner)** — screens organized under
+  `src/screens/`: `auth/` (Splash, Welcome, RoleSelect, Signup, Otp, Login,
+  ForgotPassword) · `home/` · `maid/` (FindJobs, Applications) ·
+  `employer/` (MyJobs, Maids) · `chat/` (Chats) · `profile/` (Profile +
+  CompletenessWizard) · `payments/` · `settings/` · `verification/` (all 9
+  former `kyc/` files). All imports updated (`git mv` used to keep history);
+  `src/navigation/{Tabs,ProfileDrawer}.js` + `App.js` rewired.
+
 ## 2026-10-29 — Profile completeness for BOTH roles (§7 v4) + email-verify UI + drawer
 
 Owner-directed batch: completeness before verification, employer household

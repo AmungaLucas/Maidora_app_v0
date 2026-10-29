@@ -18,8 +18,8 @@ import Animated, {
   withRepeat,
   Easing,
 } from 'react-native-reanimated';
-import BrandMark from '../components/brand/BrandMark';
-import { colors, fonts, splashThemes } from '../theme';
+import BrandMark from '../../components/brand/BrandMark';
+import { colors, fonts, splashThemes } from '../../theme';
 
 const LETTERS = 'MAIDORA'.split('');
 const RING = 300;

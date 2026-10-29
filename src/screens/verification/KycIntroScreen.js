@@ -9,6 +9,7 @@ import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton, Screen, ScreenHeader } from '../../ui';
+import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 import { REASON_LABELS, emptyDraft } from './kycShared';
 
 const STATUS_COPY = {
@@ -87,6 +88,7 @@ export default function KycIntroScreen({ navigation }) {
         eyebrow="Maidora Trust Badge"
         title="Verify your identity"
         subtitle="Free · Reviewed within 48–72 hours"
+        right={<DrawerMenuButton navigation={navigation} />}
       />
 
       <View style={styles.badgeCard}>

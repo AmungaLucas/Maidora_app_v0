@@ -13,12 +13,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import BrandLoader from '../components/brand/BrandLoader';
-import FullScreenLoader from '../components/brand/FullScreenLoader';
-import { api } from '../api';
-import { useApp } from '../context/AppContext';
-import { colors, radius } from '../theme';
-import { Banner, PrimaryButton, SecondaryButton, Screen, ScreenHeader, TextField } from '../ui';
+import BrandLoader from '../../components/brand/BrandLoader';
+import FullScreenLoader from '../../components/brand/FullScreenLoader';
+import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { colors, radius } from '../../theme';
+import { Banner, PrimaryButton, SecondaryButton, Screen, ScreenHeader, TextField } from '../../ui';
+import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 
 const AMOUNTS = [1, 50, 100, 200, 500];
 const POLL_MS = 4000;
@@ -138,6 +139,8 @@ export default function PaymentScreen({ navigation }) {
   };
 
   const pending = payment?.status === 'pending';
+  // Inside the Profile drawer → hamburger + HomeTab exit; root-stack copy → goBack.
+  const inDrawer = typeof navigation.openDrawer === 'function';
 
   return (
     <Screen>
@@ -147,6 +150,7 @@ export default function PaymentScreen({ navigation }) {
         eyebrow="M-Pesa · Live"
         title="Pay with M-Pesa"
         subtitle="STK Push via Safaricom Daraja. Real money moves — test with KES 1 first."
+        right={<DrawerMenuButton navigation={navigation} />}
       />
 
       <Banner message={error} />
@@ -162,7 +166,11 @@ export default function PaymentScreen({ navigation }) {
             <Text style={styles.receiptLabel}>M-Pesa receipt</Text>
             <Text style={styles.receiptValue}>{payment.mpesaReceipt || 'Confirming…'}</Text>
           </View>
-          <PrimaryButton title="Back to Home" onPress={() => navigation.goBack()} style={{ marginTop: 18 }} />
+          <PrimaryButton
+            title="Back to Home"
+            onPress={() => (inDrawer ? navigation.navigate('HomeTab') : navigation.goBack())}
+            style={{ marginTop: 18 }}
+          />
         </View>
       ) : payment && payment.status === 'failed' ? (
         <View style={[styles.statusCard, { borderColor: colors.danger }]}>

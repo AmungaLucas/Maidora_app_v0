@@ -785,4 +785,16 @@ Carried from this document's own "not changed" list, plus what the consolidation
 | D7 | Decisions register | Unified Spec §15.3–§15.5, §15.7 closed; §15.6 still open; 7 owner items listed. |
 | D8 | §42 | This change log. |
 
+## §42 Change log — v3.3 appended
+
+### v3.3 — 2026-10-29 (Amendment 3 — owner UX directives, profile/nav batch 2)
+
+Owner directives after using the v4 profile build; all implemented + deployed same day.
+
+| # | Section | Resolution |
+|---|---|---|
+| D9 | §7 | Profile-completeness editing is a MULTISTEP wizard (one step per check; maid 6 / employer 3); partial per-step saves; wizard opens at the first incomplete step. Completeness snapshot is app-global — the Home banner updates the moment any step saves. |
+| D10 | Navigation | The Profile tab uses a real React Navigation DRAWER (personal details · verification · payments · settings · logout). Settings icon removed from the Home header (replaced by the user's profile avatar → Profile); settings live only inside the profile drawer. |
+| D11 | Codebase | Screens organized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/` — the definitive file map for future sections. |
+
 **Rule for future amendments (unchanged):** reference the specific section changed, append to §42, and never contradict the precedence rule — built-and-live first, deliberated login/verification flow second, this document's product decisions third, MPS v3.0 base text for everything untouched.
