@@ -25,6 +25,19 @@ CREATE TABLE IF NOT EXISTS users (
   kyc_rejection_reason VARCHAR(32) NULL,     -- enum value, set only on rejection
   kyc_submitted_at DATETIME NULL,
   kyc_reviewed_at DATETIME NULL,
+  -- §8 KYC submission data — the draft lives in these columns until submit
+  -- (MPS Amendment v3.2 §35: columns on users; separate table = future).
+  kyc_full_name VARCHAR(190) NULL,           -- full name as on ID
+  kyc_id_number VARCHAR(32) NULL,
+  kyc_id_type ENUM('national_id','passport','drivers_license') NULL,
+  kyc_date_of_birth DATE NULL,
+  kyc_gender ENUM('female','male','other') NULL,  -- optional; withheld = not shown
+  kyc_id_front_url VARCHAR(255) NULL,        -- private filename inside kyc_uploads/
+  kyc_id_back_url VARCHAR(255) NULL,         -- required for national_id only
+  kyc_selfie_url VARCHAR(255) NULL,
+  kyc_urgent TINYINT(1) NOT NULL DEFAULT 0,  -- KSh 150 expedite: speed only, never refunded
+  kyc_urgent_paid_at DATETIME NULL,
+  kyc_draft_updated_at DATETIME NULL,
 
   -- §4.3 activity — decay + "last seen" read these.
   last_login_at DATETIME NULL,               -- every successful authentication

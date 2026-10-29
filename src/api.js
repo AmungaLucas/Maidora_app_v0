@@ -103,4 +103,20 @@ export const api = {
     request(`/payments/${id}${refresh ? '?refresh=1' : ''}`, { token }),
   // GET /payments — user's recent payments
   mpesaList: (token) => request('/payments', { token }),
+
+  // GET /kyc — KYC state: status, rejection reason, urgent flag, draft fields
+  kycGet: (token) => request('/kyc', { token }),
+  // PUT /kyc/draft — autosave personal details / document type (debounced)
+  kycSaveDraft: (patch, token) =>
+    request('/kyc/draft', { method: 'PUT', body: patch, token }),
+  // POST /kyc/images — { field, dataBase64, mime } (base64 JSON; big body)
+  kycUploadImage: (field, dataBase64, mime, token) =>
+    request('/kyc/images', {
+      method: 'POST',
+      body: { field, dataBase64, mime },
+      token,
+      timeoutMs: 60000,
+    }),
+  // POST /kyc/submit — completeness validated server-side; §5 gate applies
+  kycSubmit: (token) => request('/kyc/submit', { method: 'POST', token, timeoutMs: 30000 }),
 };

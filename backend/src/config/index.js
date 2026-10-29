@@ -55,6 +55,14 @@ const config = {
     from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
   },
 
+  // §8 KYC — private image storage. Files live under the app root but are
+  // NEVER web-served: kyc_uploads/.htaccess denies direct access and the only
+  // read path is the authenticated /api/kyc/images/:field route. Override
+  // with KYC_UPLOAD_DIR if the layout ever changes.
+  kyc: {
+    uploadDir: process.env.KYC_UPLOAD_DIR || path.join(__dirname, '..', '..', 'kyc_uploads'),
+  },
+
   // Safaricom Daraja — M-Pesa STK Push (Lipa na M-Pesa Online, production)
   mpesa: {
     baseUrl: process.env.MPESA_BASE_URL || 'https://api.safaricom.co.ke',

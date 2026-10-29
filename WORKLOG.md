@@ -6,6 +6,52 @@
 
 ---
 
+## 2026-10-29 — KYC submission phase (§8): 8-step app flow + gateway API, deployed
+
+Full vertical slice for identity verification (MPS §33 consolidated by
+Amendment v3.2). **KYC E2E smoke: 14/14 passed on the live gateway; auth
+e2e regression green.**
+
+- **Schema v3** (`sql/migrate_v3.js`, idempotent — 11 new columns on
+  `users`, all guarded): `kyc_full_name`, `kyc_id_number`, `kyc_id_type`,
+  `kyc_date_of_birth`, `kyc_gender`, `kyc_id_front_url`, `kyc_id_back_url`,
+  `kyc_selfie_url`, `kyc_urgent` + `kyc_urgent_paid_at`,
+  `kyc_draft_updated_at`. Draft lives in these columns (Amendment v3.2 §35
+  — separate maid_kyc table = future hardening).
+- **Gateway** (`src/routes/kyc.js`, mounted in `app.js` with its own 12 MB
+  JSON parser for base64 image bodies): `GET /kyc` (state), `PUT /kyc/draft`
+  (autosave, not_started→draft, under-18 rejected, writes lock at
+  submitted/under_review → 409 `kyc_locked`), `POST /kyc/images`
+  (base64 JPEG/PNG/WEBP ≤5 MB, magic-byte sniffed, stored under private
+  `kyc_uploads/` with .htaccess deny-all + random names), `POST /kyc/submit`
+  (requireVerified + completeness per id_type; back required for national_id;
+  clears rejection on resubmit), `GET /kyc/images/:field` (owner-only stream,
+  basename-guarded). `app.js` error handler now passes `field`/`code`
+  through so the app can highlight the exact missing item.
+- **Urgent KSh 150** (`payments.js`): a settled `kyc_urgent` STK push —
+  via callback OR query-path settlement — grants `kyc_urgent` +
+  `kyc_urgent_paid_at` on the payer. Speed only, never refunded (§33.3).
+- **App** (`src/screens/kyc/`): KycIntro (status-aware + urgent upsell with
+  inline STK + polling), KycPersonal (1.5 s debounced autosave, DD-MM-YYYY
+  DOB, optional gender chips), KycDocType (national_id default),
+  DocCaptureScreen ×3 wrappers (front/back/selfie — crop via
+  allowsEditing, ≤1400 px JPEG via expo-image-manipulator, selfie camera-
+  only + front lens), KycReview (retake-per-item with returnTo), KycDone.
+  HomeScreen gains the §8 non-blocking banner (not_started/draft/rejected/
+  in-review states). expo-image-picker + expo-image-manipulator added;
+  app.json carries the camera/photos permission strings.
+- **Deliberate deferrals (documented):** blur/glare ML detection and real
+  liveness/face-match need native modules → EAS dev build (same pattern as
+  SMS Retriever). v1 ships capture + crop + size/type validation +
+  server-side completeness; review is manual (tooling = next roadmap item).
+- **Deploy evidence:** migrate_v3 live (11 columns added), health +
+  db-health OK, unauth 401s on all KYC routes, callback ACK intact,
+  14/14 KYC E2E (register→draft→under-18 reject→premature-submit reject→
+  3 uploads→garbage reject→submit→locked 409→image stream→cleanup).
+  Probe scripts: `scripts/kyc_e2e.py`, `scripts/deploy_kyc.py` (agent-side).
+
+---
+
 ## 2026-10-29 — MPS deliberations doc consolidated (Amendment v3.2) + spec §15 register closed
 
 The owner's "initial deliberations doc" landed on GitHub as

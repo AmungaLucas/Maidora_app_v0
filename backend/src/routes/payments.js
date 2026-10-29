@@ -59,6 +59,23 @@ function paymentView(p) {
   };
 }
 
+// §8 urgent KYC (KSh 150) — marks the payer's identity review as expedited
+// the moment an 'kyc_urgent' payment settles. Speed only: it never buys
+// approval and is never refunded (rejection, abandonment or cancel).
+// Fire-and-forget: a grant failure must not affect payment settlement.
+async function grantKycUrgent(userId) {
+  if (!userId) return;
+  try {
+    const [r] = await pool.query(
+      'UPDATE users SET kyc_urgent = 1, kyc_urgent_paid_at = NOW() WHERE id = ? AND kyc_urgent = 0',
+      [userId]
+    );
+    if (r.affectedRows) console.log(`[payments] kyc_urgent granted to user ${userId}`);
+  } catch (e) {
+    console.error('[payments] kyc_urgent grant failed:', e.message);
+  }
+}
+
 // POST /api/payments/stk-push
 // §5 verification gate — spending money is a platform service; unverified
 // accounts must clear phone/email verification first. Browsing stays open.
@@ -171,6 +188,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             );
             p.status = 'success';
             p.result_desc = q.ResultDesc;
+            if (p.purpose === 'kyc_urgent') await grantKycUrgent(p.user_id);
           } else if (rc !== null && DEFINITIVE_FAILURE_CODES.has(rc)) {
             if (ageMs >= SETTLE_MS) {
               // The prompt expired long ago (1032 cancelled, 1037 timed out,
@@ -216,6 +234,11 @@ router.post('/callback', async (req, res) => {
       }
       const rc = cb.ResultCode === undefined || cb.ResultCode === null ? null : Number(cb.ResultCode);
       const status = rc === 0 ? 'success' : 'failed';
+      // Purpose/user for side-effects (kyc_urgent) — read before the override.
+      const [[pay]] = await pool.query(
+        'SELECT user_id, purpose FROM payments WHERE checkout_request_id = ? LIMIT 1',
+        [cb.CheckoutRequestID]
+      );
       // Unconditional on purpose: the callback overrides any state the
       // query path wrote (it is the authoritative result from Safaricom).
       const [r] = await pool.query(
@@ -237,6 +260,8 @@ router.post('/callback', async (req, res) => {
       );
       if (!r.affectedRows) {
         console.warn(`[payments/callback] no payment row matches ${cb.CheckoutRequestID}`);
+      } else if (status === 'success' && pay && pay.purpose === 'kyc_urgent') {
+        await grantKycUrgent(pay.user_id);
       }
     } else {
       console.warn(

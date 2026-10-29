@@ -29,6 +29,14 @@ import LoginScreen from './src/screens/LoginScreen';
 import ForgotPasswordScreen from './src/screens/ForgotPasswordScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import PaymentScreen from './src/screens/PaymentScreen';
+import KycIntroScreen from './src/screens/kyc/KycIntroScreen';
+import KycPersonalScreen from './src/screens/kyc/KycPersonalScreen';
+import KycDocTypeScreen from './src/screens/kyc/KycDocTypeScreen';
+import KycDocFrontScreen from './src/screens/kyc/KycDocFrontScreen';
+import KycDocBackScreen from './src/screens/kyc/KycDocBackScreen';
+import KycSelfieScreen from './src/screens/kyc/KycSelfieScreen';
+import KycReviewScreen from './src/screens/kyc/KycReviewScreen';
+import KycDoneScreen from './src/screens/kyc/KycDoneScreen';
 import { EmployerTabs, HousehelpTabs, tabsRouteFor } from './src/navigation/Tabs';
 
 const Stack = createNativeStackNavigator();
@@ -101,6 +109,15 @@ function RootNavigator() {
       <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="Payment" component={PaymentScreen} />
+      {/* KYC / trust badge (§8) — househelp-facing 8-step flow */}
+      <Stack.Screen name="KycIntro" component={KycIntroScreen} />
+      <Stack.Screen name="KycPersonal" component={KycPersonalScreen} />
+      <Stack.Screen name="KycDocType" component={KycDocTypeScreen} />
+      <Stack.Screen name="KycDocFront" component={KycDocFrontScreen} />
+      <Stack.Screen name="KycDocBack" component={KycDocBackScreen} />
+      <Stack.Screen name="KycSelfie" component={KycSelfieScreen} />
+      <Stack.Screen name="KycReview" component={KycReviewScreen} />
+      <Stack.Screen name="KycDone" component={KycDoneScreen} />
     </Stack.Navigator>
   );
 }

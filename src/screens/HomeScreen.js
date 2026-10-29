@@ -5,9 +5,38 @@ import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { ROLES, colors, radius } from '../theme';
 import { Screen } from '../ui';
+import { REASON_LABELS } from './kyc/kycShared';
 
 function firstName(fullName) {
   return String(fullName || '').trim().split(/\s+/)[0] || 'there';
+}
+
+function kycBannerTitle(user) {
+  switch (user?.kycStatus) {
+    case 'draft':
+      return 'Continue your verification';
+    case 'rejected':
+      return `Action needed: ${REASON_LABELS[user?.kycRejectionReason] || 'Your submission needs attention'}`;
+    case 'submitted':
+    case 'under_review':
+      return 'Verification in review';
+    default:
+      return 'Get your Trust Badge';
+  }
+}
+
+function kycBannerBody(user) {
+  switch (user?.kycStatus) {
+    case 'draft':
+      return 'Your progress is saved — pick up where you left off.';
+    case 'rejected':
+      return 'Retake the failed step and submit again — it is free.';
+    case 'submitted':
+    case 'under_review':
+      return 'We will notify you within 72 hours.';
+    default:
+      return 'Verify your ID with a quick selfie — free, reviewed in 48–72 hours. Verified members get hired more.';
+  }
 }
 
 export default function HomeScreen({ navigation }) {
@@ -63,6 +92,30 @@ export default function HomeScreen({ navigation }) {
             : 'Keep your phone verified and location up to date — families search near you first.'}
         </Text>
       </View>
+
+      {/* §8 — non-blocking KYC banner (househelp, until approved) */}
+      {!isEmployer && user?.kycStatus !== 'approved' ? (
+        <Pressable style={styles.kycCard} onPress={() => navigation.navigate('KycIntro')}>
+          <View style={styles.kycIconWrap}>
+            <Ionicons
+              name={
+                user?.kycStatus === 'submitted' || user?.kycStatus === 'under_review'
+                  ? 'time-outline'
+                  : user?.kycStatus === 'rejected'
+                  ? 'alert-circle'
+                  : 'shield-checkmark-outline'
+              }
+              size={20}
+              color={colors.goldDark}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.kycTitle}>{kycBannerTitle(user)}</Text>
+            <Text style={styles.kycBody}>{kycBannerBody(user)}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </Pressable>
+      ) : null}
 
       <Pressable style={styles.mpesaCard} onPress={() => navigation.navigate('Payment')}>
         <View style={styles.mpesaIconWrap}>
@@ -159,6 +212,29 @@ const styles = StyleSheet.create({
   },
   mpesaTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
   mpesaBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
+  kycCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.gold,
+    padding: 14,
+  },
+  kycIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(214, 166, 79, 0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kycTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink },
+  kycBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
   footnote: {
     marginTop: 18,
     fontSize: 12.5,

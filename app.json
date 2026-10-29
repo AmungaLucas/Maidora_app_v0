@@ -16,6 +16,13 @@
           "resizeMode": "contain",
           "backgroundColor": "#F7F3E9"
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Maidora to access your photos so you can upload your ID document.",
+          "cameraPermission": "Allow Maidora to use your camera to capture your ID document and verification selfie."
+        }
       ]
     ],
     "ios": {

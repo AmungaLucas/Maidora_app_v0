@@ -34,7 +34,7 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
-| KYC flow (§8) | ⏳ PENDING | Columns + gate live; flow/images/review not built |
+| KYC flow (§8) | 🟡 SUBMISSION LIVE | 8-step app flow + draft/images/submit API + urgent KSh 150 STK grant; review tooling + blur/glare ML deferred (see §10) |
 | Paywall after 2 applications (§9) | ⏳ PENDING | Needs applications first |
 | Visibility decay ranking (§10) | ⏳ PENDING | `last_active_at` collected; ranking ships with search |
 | Real chat backend | ⏳ PENDING | Chats tab is a placeholder |
@@ -192,7 +192,8 @@ src/config/db.js        MySQL pool (lazy)
 src/routes/health.js    /api/health, /api/db-health
 src/routes/auth.js      register | verify-otp | resend-otp | login | onboarding | me | email verification
 src/routes/profile.js   GET/PUT maid profile + derived completeness (§7)
-src/routes/payments.js  stk-push (§5 gated) | list | :id status | callback
+src/routes/kyc.js       KYC state | draft autosave | image upload (base64) | submit | private image stream (§8)
+src/routes/payments.js  stk-push (§5 gated) | list | :id status | callback (grants kyc_urgent)
 src/services/otp.js     hashed OTPs (phone + email), cooldown/hourly/attempt caps
 src/services/sms.js     TalkSasa API v3 client
 src/services/email.js   nodemailer SMTP (optional email verification, fails soft)
@@ -219,7 +220,12 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 | POST `/api/auth/verify-email` | JWT | `{code}` → stamps `email_verified_at`; re-checks disposable list |
 | GET `/api/profile` | JWT | maid profile + derived §7 completeness |
 | PUT `/api/profile` | JWT | upsert §7 fields (househelp) |
-| POST `/api/payments/stk-push` | JWT + **verified** | `{amount, phone?, purpose?}` → STK prompt (§5 gate) |
+| GET `/api/kyc` | JWT | KYC state: status, rejection reason, urgent flag, draft fields, image flags |
+| PUT `/api/kyc/draft` | JWT | autosave personal/doc-type fields (client debounces ~1.5 s); `not_started` → `draft` |
+| POST `/api/kyc/images` | JWT | one image per call (base64 JSON, ≤5 MB, magic-sniffed) → private `kyc_uploads/` |
+| POST `/api/kyc/submit` | JWT + **verified** | completeness check → `kyc_status='submitted'` + `kyc_submitted_at`; writes lock (409) |
+| GET `/api/kyc/images/:field` | JWT | streams the caller's own stored image (private dir; admin review access later) |
+| POST `/api/payments/stk-push` | JWT + **verified** | `{amount, phone?, purpose?}` → STK prompt (§5 gate); purpose `kyc_urgent` = KSh 150 expedite |
 | GET `/api/payments` | JWT | user's last 20 payments |
 | GET `/api/payments/:id?refresh=1` | JWT | status; `refresh=1` may live-query Daraja (§6.2) |
 | POST `/api/payments/callback` | **public** | Daraja result receiver — ACKs fast |
@@ -240,10 +246,13 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 
 ### 5.4 Database
 
-- **users (v2)** — identity; `role` NULL until onboarding (immutable after);
+- **users (v3)** — identity; `role` NULL until onboarding (immutable after);
   §4.2 split status model: `account_status` enum, `phone_verified_at`,
-  `email_verified_at`, `kyc_status` + reason/submitted/reviewed;
-  `last_login_at`, `last_active_at` (1h write-throttled); location
+  `email_verified_at`, `kyc_status` + reason/submitted/reviewed **+ §8
+  submission columns** (`kyc_full_name`, `kyc_id_number`, `kyc_id_type`,
+  `kyc_date_of_birth`, `kyc_gender`, `kyc_id_front/back/selfie_url`,
+  `kyc_urgent` + `kyc_urgent_paid_at`, `kyc_draft_updated_at` — migrate_v3,
+  idempotent); `last_login_at`, `last_active_at` (1h write-throttled); location
   (`location_name`/`location_area`/`location_county` + `location_source`
   gps\|manual + lat/lng); referrals (`my_referral_code` own,
   `referred_by_code` entered at signup). Old single `status` and
@@ -255,7 +264,8 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 - **login_attempts** — §11 throttle data (identifier, ip, success, ts).
 - **phone_otps** — SHA-256 `code_hash`, attempts, `expires_at`, `consumed_at`.
 - **email_otps** — same policy for the optional email path.
-- **payments** — `purpose`, `amount`, `phone`, `merchant_request_id`,
+- **payments** — `purpose` (incl. `kyc_urgent` — a settled push grants
+  `kyc_urgent` on the payer), `amount`, `phone`, `merchant_request_id`,
   `checkout_request_id` (indexed), `mpesa_receipt`, `result_code`,
   `result_desc`, `status` enum(`pending`,`success`,`failed`),
   `raw_callback` (full Daraja JSON), timestamps. MySQL typed the JSON column
@@ -378,14 +388,16 @@ new columns need explicit `ALTER TABLE` verification.
 
 ## 10. Pending work / roadmap
 
-**Next up (spec §14 order):** KYC flow (§8) — screens, image pipeline
-(capture/crop/blur-glare detection), server-side drafts, review tooling,
-KES 150 urgent fee via the live M-Pesa rails · jobs listings CRUD + Find
-Jobs feed · applications + §9 welcome bonus (2 lifetime) + paywall (tiers
-now DECIDED via MPS Amendment v3.2 — PAYG KSh 50 / Basic KSh 99 / Gold
-KSh 199 + boosts; only multi-device session policy §15.6 still open) ·
-search/matching with location + §10 decay ranking · real chat backend ·
-§13 suggestion cards (day-based, dismissible) · push notifications.
+**Next up (spec §14 order):** KYC **review tooling** — admin screen to view
+submissions (own-image streaming route exists; needs admin scope + approve/
+reject with the §33.3 enum) · blur/glare ML detection + real liveness/face-
+match deferred to the EAS dev build (zero-native layers ship today) · jobs
+listings CRUD + Find Jobs feed · applications + §9 welcome bonus (2
+lifetime) + paywall (tiers DECIDED via MPS Amendment v3.2 — PAYG KSh 50 /
+Basic KSh 99 / Gold KSh 199 + boosts; only multi-device session policy
+§15.6 still open) · search/matching with location + §10 decay ranking ·
+real chat backend · §13 suggestion cards (day-based, dismissible) · push
+notifications.
 
 **Gateway hardening:** cron to expire stale `pending` payments (e.g. > 24 h)
 · log rotation/monitoring · optional IP filtering on the callback route ·

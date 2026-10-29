@@ -22,7 +22,7 @@
 | §5 Verification gate | ✅ | `requireVerified` middleware (gates services) |
 | §6 Location | ✅ (login update) | `LoginScreen.js` + `sanitizeLoginLocation` |
 | §7 Profile completeness | ✅ | `maid_profiles`, `GET/PUT /api/profile`, ProfileScreen |
-| §8 KYC / trust badge | ⏳ next phase | columns live (`kyc_*`), flow not built |
+| §8 KYC / trust badge | 🟡 submission live (2026-10-29) | 8-step app flow + `src/routes/kyc.js` (draft/images/submit); review tooling next |
 | §9 Free applications/paywall | ⏳ | needs jobs/applications first |
 | §10 Visibility decay | ⏳ | `last_active_at` collected; ranking comes with search |
 | §11 Login rules | ✅ | throttle in `POST /auth/login`, 30d sliding token |

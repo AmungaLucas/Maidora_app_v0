@@ -3,7 +3,7 @@
 //
 // Structure:
 //   src/config     env loading, MySQL pool
-//   src/routes     health, auth, profile, payments (mounted below)
+//   src/routes     health, auth, profile, payments, kyc (mounted below)
 //   src/services   otp, sms (TalkSasa), mpesa (Daraja), email (SMTP)
 //   src/middleware JWT auth + verification gate
 //   src/utils      validation (mirrors the mobile app)
@@ -13,8 +13,15 @@ const healthRoutes = require('./src/routes/health');
 const authRoutes = require('./src/routes/auth');
 const paymentsRoutes = require('./src/routes/payments');
 const profileRoutes = require('./src/routes/profile');
+const kycRoutes = require('./src/routes/kyc');
 
 const app = express();
+
+// KYC image uploads arrive as base64 JSON (up to ~7 MB encoded) — mount the
+// KYC router with its own larger body parser BEFORE the global 256kb one.
+// body-parser skips requests it has already parsed, so nothing double-runs.
+app.use('/api/kyc', express.json({ limit: '12mb' }), kycRoutes);
+
 app.use(express.json({ limit: '256kb' }));
 
 // --- Routes ---
@@ -29,11 +36,15 @@ app.use((req, res) => {
 });
 
 // Central error handler — maps err.status from services/routes.
+// field/code pass through so the app can highlight the offending input
+// (e.g. which KYC item is missing) and branch on typed error codes.
 app.use((err, req, res, next) => {
   const status = err.status || 500;
   if (status >= 500) console.error('[gateway] error on', req.method, req.path, err);
   res.status(status).json({
     message: status >= 500 ? 'Something went wrong. Please try again.' : err.message,
+    ...(err.field ? { field: err.field } : {}),
+    ...(err.code && status < 500 ? { code: err.code } : {}),
   });
 });
 

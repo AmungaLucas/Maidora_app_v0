@@ -59,6 +59,8 @@ function publicUser(u) {
     emailVerified: !!u.email_verified_at,
     accountStatus: u.account_status,
     kycStatus: u.kyc_status || 'not_started',
+    kycRejectionReason: u.kyc_rejection_reason || null, // §33.3 banner: "Action needed: {reason}"
+    kycUrgent: !!u.kyc_urgent, // KSh 150 expedite paid (speed only)
     trustBadge: u.kyc_status === 'approved',
     requiresOnboarding: !u.role,
   };
