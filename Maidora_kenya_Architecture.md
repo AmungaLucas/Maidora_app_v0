@@ -25,7 +25,7 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Activity tracking: last_login_at / last_active_at (§4.3) | ✅ LIVE | 1h write-throttle in `requireAuth` |
 | Location auto-update at login (§6) | ✅ LIVE | GPS fix best-effort from app; last known stands on failure |
 | Disposable email block (§12) | ✅ LIVE | signup + email-verification re-check |
-| Email verification path (§2/§5, nodemailer SMTP) | 🟡 WIRED | Code live; needs `SMTP_PASS` in server `.env` (rotated secret) |
+| Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); `verify()` passes on `mail.maidora.co.ke:465` |
 | Profile completeness §7 (maid_profiles + banner + editor) | ✅ LIVE | `GET/PUT /api/profile` + ProfileScreen card |
 | M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven |
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
@@ -394,8 +394,11 @@ metrics.
 (then set `OTP_APP_HASH` — gateway already appends it) · store builds ·
 privacy policy & store assets.
 
-**Security hygiene:** rotate SSH passphrase + GitHub PAT (due) · owner to
-set rotated `SMTP_PASS` in server `.env` to activate the email path.
+**Security hygiene:** rotate SSH passphrase + GitHub PAT (due) · SMTP
+credential activated 2026-10-29; because the value also transited chat in
+plain text (and matches the SSH passphrase), rotate it at the cPanel mail
+account at the next rotation window — server `.env` is the only place it
+ever lives.
 
 ---
 

@@ -11,7 +11,7 @@
 | Spec section | Status | Where |
 |---|---|---|
 | §1 Current state | — | — |
-| §2 Email/SMTP | ✅ wired, pass pending | `src/services/email.js`, `SMTP_*` env |
+| §2 Email/SMTP | ✅ live (2026-10-29) | `src/services/email.js`, `SMTP_*` env; `SMTP_PASS` installed + auth verified |
 | §3.1–3.2 Signup fields/behavior | ✅ | `SignupScreen.js`, `POST /auth/register` |
 | §3.2 Role at onboarding | ✅ | `POST /auth/onboarding`, `RoleSelectScreen.js` |
 | §3.3 Account lifecycle | ✅ | `pending_verification` → `active` |

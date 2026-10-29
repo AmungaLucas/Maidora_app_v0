@@ -6,6 +6,30 @@
 
 ---
 
+## 2026-10-29 — Email path activated (SMTP_PASS installed + verified)
+
+Completes spec §2 / adoption map "wired, pass pending" → **live**.
+
+- **Server `.env`**: appended `SMTP_PASS` (owner-supplied rotated
+  credential; value only ever lives in the server `.env`, chmod 600).
+  Pre-change backup: `/home/maidorac/backups/.env.bak-smtp-20261029-100952`.
+  All other `SMTP_*` vars were already correct (host `mail.maidora.co.ke`,
+  port 465, secure, user `verification@maidora.co.ke`).
+- **Verified**: gateway restarted via `tmp/restart.txt`; `/api/health` +
+  `/api/db-health` OK; on-server probe loaded the gateway's own
+  `src/config` and ran nodemailer `verify()` → connection + auth OK
+  (probe script kept at agent-side `scripts/smtp_verify.js`, never
+  committed with any secret).
+- **Post-verification email path is now fully usable end-to-end**
+  (`POST /auth/request-email-verification` → `/auth/verify-email`); no UI
+  for it yet (deferred — see roadmap).
+- **Hygiene flag:** the SMTP value was shared in chat in plain text AND
+  equals the SSH key passphrase. Recommend rotating it (cPanel mail
+  account) at the next rotation window and keeping SSH/SMTP secrets
+  distinct. Added to architecture §10 security hygiene.
+
+---
+
 ## 2026-10-29 — Identity & verification foundation (unified spec Phase 1)
 
 Implements spec priorities #1 (verification gate) and #2 (profile
