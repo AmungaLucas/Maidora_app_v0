@@ -21,7 +21,7 @@
 | §4 Data model | ✅ v2 | `sql/schema.sql`, `sql/migrate_v2.js` |
 | §5 Verification gate | ✅ | `requireVerified` middleware (gates services) |
 | §6 Location | ✅ (login update) | `LoginScreen.js` + `sanitizeLoginLocation` |
-| §7 Profile completeness | ✅ | `maid_profiles`, `GET/PUT /api/profile`, ProfileScreen |
+| §7 Profile completeness | ✅ BOTH roles (v4) | `maid_profiles` + `employer_profiles`, role-aware `GET/PUT /api/profile`, ProfileScreen + HomeScreen banner (first) |
 | §8 KYC / trust badge | 🟡 submission live (2026-10-29) | 8-step app flow + `src/routes/kyc.js` (draft/images/submit); review tooling next |
 | §9 Free applications/paywall | ⏳ | needs jobs/applications first |
 | §10 Visibility decay | ⏳ | `last_active_at` collected; ranking comes with search |
@@ -183,6 +183,13 @@ If an API/UI needs a single display status, derive it at read time.
   - **Next of kin / contact person** — full name, phone number, relationship
 - All are **non-blockers** — the user can use allowed services without them.
 - **Order: profile completeness first, then KYC.** Any field filled at completeness **autofills into KYC**.
+
+### §7.1 Built additions (v4, 2026-10-29) — both roles
+- **Maid (househelp):** 6 completeness checks — DOB, languages, job type, years experience, **bio ("tell us a little more about yourself")**, next of kin. `expectedSalary` is the API name for the `wage_expectation` column (legacy key accepted); optional, not a completeness check.
+- **Languages:** full Kenyan list (official + community languages) with **Other → specify** storing the typed value as its own entry; max 8.
+- **DOB input:** 3-step picker popup (year → month → day) in Profile and KYC personal steps.
+- **Employer:** new `employer_profiles` table — **household size (1–30), number of children (0–20), monthly budget (KES)** — 3 completeness checks; partial saves allowed.
+- **Email verification UI:** tapping "Email unverified" opens a sheet with a prefilled **editable** email → `POST /auth/update-email` (clears `email_verified_at`, 409 on duplicates) → SMTP 6-digit code → verified.
 
 ---
 

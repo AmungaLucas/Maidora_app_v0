@@ -25,6 +25,7 @@ const {
   validateRegister,
   normalizePhone,
   isDisposableEmail,
+  EMAIL_RE,
 } = require('../utils/validate');
 const { requireAuth } = require('../middleware/auth');
 
@@ -451,6 +452,48 @@ router.post('/request-email-verification', requireAuth, async (req, res, next) =
       err.status = 502;
       throw err;
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/auth/update-email — change the account email BEFORE verification
+// (used by the Profile screen: tap "Email unverified" → prefilled, editable).
+// Changing the address clears email_verified_at; a fresh code is then sent to
+// the new address via /request-email-verification. Duplicate contact → 409
+// (same policy as §4.3 register). Disposable blocklist re-checked here (§12).
+router.post('/update-email', requireAuth, async (req, res, next) => {
+  try {
+    const [[u]] = await pool.query('SELECT * FROM users WHERE id = ? LIMIT 1', [req.user.uid]);
+    if (!u) return res.status(401).json({ message: 'Session expired. Please log in again.' });
+    const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      return res.status(400).json({ message: 'Enter a valid email address.', field: 'email' });
+    }
+    if (isDisposableEmail(email)) {
+      return res.status(400).json({
+        code: 'disposable_email',
+        message: 'This email provider is not accepted. Please use another.',
+        field: 'email',
+      });
+    }
+    if (email === String(u.email || '').toLowerCase()) {
+      return res.json({ message: 'Email unchanged.', user: publicUser(u) });
+    }
+    const [[dupe]] = await pool.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+    if (dupe) {
+      return res.status(409).json({
+        code: 'email_taken',
+        message: 'An account with this email already exists. Try logging in instead.',
+        field: 'email',
+      });
+    }
+    await pool.query('UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?', [
+      email,
+      u.id,
+    ]);
+    const [[fresh]] = await pool.query('SELECT * FROM users WHERE id = ? LIMIT 1', [u.id]);
+    return res.json({ message: 'Email updated.', user: publicUser(fresh) });
   } catch (e) {
     next(e);
   }

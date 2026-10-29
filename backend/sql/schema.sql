@@ -123,6 +123,19 @@ CREATE TABLE IF NOT EXISTS maid_profiles (
   CONSTRAINT fk_maid_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── Employer profiles — §7 employer side (household context, non-blocking) ─
+-- Completeness (derived at read): household_size, num_children, budget_amount
+-- — all three present = complete. Non-blocking, mirrors maid_profiles.
+CREATE TABLE IF NOT EXISTS employer_profiles (
+  user_id BIGINT UNSIGNED PRIMARY KEY,
+  household_size TINYINT UNSIGNED NULL,      -- people living in the home, 1..30
+  num_children TINYINT UNSIGNED NULL,        -- children at home, 0..20
+  budget_amount INT UNSIGNED NULL,           -- KES per month offered
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_employer_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── M-Pesa STK Push payments (Lipa na M-Pesa Online) — unchanged ───────────
 CREATE TABLE IF NOT EXISTS payments (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

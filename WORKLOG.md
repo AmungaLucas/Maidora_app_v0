@@ -6,6 +6,40 @@
 
 ---
 
+## 2026-10-29 — Profile completeness for BOTH roles (§7 v4) + email-verify UI + drawer
+
+Owner-directed batch: completeness before verification, employer household
+questions, maid salary/about-you fields, full Kenyan languages, 3-step DOB
+picker, editable email verification, drawer navigation. **Live E2E: 17/17
+passed on the gateway; `expo export` bundle green.**
+
+- **Schema v4** (`sql/migrate_v4.js`, idempotent): new `employer_profiles`
+  table — `household_size` (1–30), `num_children` (0–20), `budget_amount`
+  (KES/month). Maid side needs no DDL.
+- **Role-aware `GET/PUT /api/profile`** (`src/routes/profile.js`): employer →
+  household profile (3 completeness checks, partial saves OK); househelp →
+  maid profile now **6 checks** (bio added as "About yourself").
+  `expectedSalary` = v4 API name for `wage_expectation` (legacy key accepted).
+- **`POST /auth/update-email`** (`src/routes/auth.js`): change email before
+  verification (EMAIL_RE + disposable blocklist + 409 on duplicates; clears
+  `email_verified_at`).
+- **App:** `DatePickerModal` (year → month → day popup; 16–80 profile,
+  18–100 KYC) used in ProfileScreen + KycPersonalScreen; `AppDrawer`
+  (built-in Animated, no new deps) separates Verification / Payments /
+  Settings / Log out from Profile; `EmailVerifySheet` (prefilled editable
+  email → code → verified) behind the "Email unverified" chip; maid editor
+  gains bio + expected-salary (renamed) + full `KENYAN_LANGUAGES` list
+  (`src/data/kenya.js`) with Other → specify; employer household editor.
+- **HomeScreen:** profile-completeness banner renders FIRST (both roles,
+  spec §7 → §8 order), KYC banner now shows for BOTH roles; banner copy
+  neutralized (Trust Badge builds trust on both sides).
+- **Deployed:** backup `gateway-20261029-121453.tgz` → upload → migrate_v4
+  (`employer_profiles` created) → restart → health/db-health OK → 401 gates
+  OK → E2E `scripts/profile_v4_e2e.py` 17/17 (employer household incl.
+  0-children edge + bad-size 400; maid 6/6 incl. custom language "Sigaw",
+  legacy wageExpectation key; update-email + injected email OTP verify +
+  duplicate 409).
+
 ## 2026-10-29 — Build fix: root-level `babel-preset-expo` (Metro "transformFile" crash)
 
 Metro bundling broke with the misleading `TypeError: Cannot read properties of

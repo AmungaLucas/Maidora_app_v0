@@ -2,11 +2,13 @@
 // name; autosaves the server draft with a 1.5 s debounce; DOB drives the
 // age gate (≥ 18, §39.1); gender optional and withholdable.
 import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
-import { colors } from '../../theme';
+import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton, SecondaryButton, TextField } from '../../ui';
+import DatePickerModal from '../../components/common/DatePickerModal';
 import {
   KycShell,
   calcAge,
@@ -30,6 +32,7 @@ export default function KycPersonalScreen({ navigation, route }) {
   const [banner, setBanner] = useState('');
   const [saveNote, setSaveNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [dobPickerOpen, setDobPickerOpen] = useState(false);
 
   const saveTimer = useRef(null);
   const dirtyRef = useRef(false);
@@ -143,18 +146,19 @@ export default function KycPersonalScreen({ navigation, route }) {
           keyboardType="default"
           placeholder="e.g. 12345678"
         />
-        <TextField
-          label="Date of birth"
-          value={dob}
-          onChangeText={(v) => {
-            touch();
-            setDob(v);
-          }}
-          error={errors.dob}
-          keyboardType="number-pad"
-          placeholder="DD-MM-YYYY"
-          hint={dob && !errors.dob ? `Used for age filtering — employers see your age only.` : 'Why? Employers filter by age; your full birth date stays private.'}
-        />
+        {/* DOB — 3-step picker popup (year → month → day), consistent with §7 */}
+        <Text style={labelStyle}>Date of birth</Text>
+        <Pressable style={styles.pickerField} onPress={() => setDobPickerOpen(true)}>
+          <Text style={[styles.pickerFieldText, !dob && styles.pickerFieldPlaceholder]}>
+            {dob || 'Pick your date of birth'}
+          </Text>
+          <Ionicons name="calendar-outline" size={20} color={colors.brand} />
+        </Pressable>
+        <Text style={hintStyle}>
+          {dob && !errors.dob
+            ? 'Used for identity verification and age checks.'
+            : 'Your full birth date stays private — others see only your age.'}
+        </Text>
 
         <Text style={labelStyle}>Gender (optional)</Text>
         <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
@@ -179,9 +183,41 @@ export default function KycPersonalScreen({ navigation, route }) {
 
         <PrimaryButton title="Continue" onPress={onContinue} loading={busy} style={{ marginTop: 14 }} />
       </KycShell>
+
+      <DatePickerModal
+        visible={dobPickerOpen}
+        initialDate={draft.dateOfBirth || ''}
+        title="Your date of birth"
+        minAge={18}
+        maxAge={100}
+        onClose={() => setDobPickerOpen(false)}
+        onConfirm={(iso) => {
+          touch();
+          setDob(formatDate(iso));
+          setErrors((e) => ({ ...e, dob: undefined }));
+          setDobPickerOpen(false);
+        }}
+      />
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  pickerField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    minHeight: 52,
+    marginBottom: 8,
+  },
+  pickerFieldText: { flex: 1, fontSize: 16, color: colors.ink },
+  pickerFieldPlaceholder: { color: colors.muted },
+});
 
 const labelStyle = { fontSize: 13, fontWeight: '700', color: colors.ink, marginBottom: 6 };
 const hintStyle = { fontSize: 12, color: colors.muted, marginBottom: 8 };

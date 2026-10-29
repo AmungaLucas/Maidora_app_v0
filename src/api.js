@@ -85,6 +85,9 @@ export const api = {
   // POST /auth/request-email-verification — optional email path (SMTP)
   requestEmailVerification: (token) =>
     request('/auth/request-email-verification', { method: 'POST', token }),
+  // POST /auth/update-email — change email before verification (409 if taken)
+  updateEmail: (email, token) =>
+    request('/auth/update-email', { method: 'POST', body: { email }, token }),
   // POST /auth/verify-email — { code }
   verifyEmail: (code, token) =>
     request('/auth/verify-email', { method: 'POST', body: { code }, token }),

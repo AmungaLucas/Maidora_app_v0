@@ -1,7 +1,11 @@
 // Home tab — shared by both roles, content adapts to user.role.
-import React from 'react';
+// Banner order per spec §7 → §8: PROFILE COMPLETENESS first, verification
+// (Trust Badge) second — both roles. Completeness is fetched from the
+// role-aware GET /profile (maid: 6 checks, employer: 3 checks).
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { api } from '../api';
 import { useApp } from '../context/AppContext';
 import { ROLES, colors, radius } from '../theme';
 import { Screen } from '../ui';
@@ -35,13 +39,36 @@ function kycBannerBody(user) {
     case 'under_review':
       return 'We will notify you within 72 hours.';
     default:
-      return 'Verify your ID with a quick selfie — free, reviewed in 48–72 hours. Verified members get hired more.';
+      return 'Verify your ID with a quick selfie — free, reviewed within 72 hours. A Trust Badge builds trust on both sides.';
   }
 }
 
 export default function HomeScreen({ navigation }) {
-  const { user } = useApp();
+  const { user, token } = useApp();
   const isEmployer = user?.role !== 'househelp';
+  const [completeness, setCompleteness] = useState(null);
+
+  // Profile completeness (both roles) — fetched non-blocking; the banner
+  // simply hides while it is unknown.
+  useEffect(() => {
+    if (!token || !user?.role) {
+      setCompleteness(null);
+      return undefined;
+    }
+    let live = true;
+    api
+      .getProfile(token)
+      .then((res) => {
+        if (live) setCompleteness(res.completeness || null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [token, user?.role]);
+
+  const showCompletenessBanner =
+    completeness && (completeness.done < completeness.total || completeness.total === 0);
 
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
@@ -93,8 +120,29 @@ export default function HomeScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* §8 — non-blocking KYC banner (househelp, until approved) */}
-      {!isEmployer && user?.kycStatus !== 'approved' ? (
+      {/* §7 — PROFILE COMPLETENESS banner FIRST (both roles, spec §7 → §8 order) */}
+      {showCompletenessBanner ? (
+        <Pressable
+          style={styles.completenessCard}
+          onPress={() => navigation.navigate('ProfileTab')}
+        >
+          <View style={styles.completenessIconWrap}>
+            <Ionicons name="sparkles-outline" size={20} color={colors.brand} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.completenessTitle}>
+              Profile strength — {completeness.done}/{completeness.total}
+            </Text>
+            <Text style={styles.completenessBody} numberOfLines={2}>
+              Add: {completeness.missing.join(', ')}. This never blocks you.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </Pressable>
+      ) : null}
+
+      {/* §8 — non-blocking KYC banner (BOTH roles, until approved) */}
+      {user?.kycStatus !== 'approved' ? (
         <Pressable style={styles.kycCard} onPress={() => navigation.navigate('KycIntro')}>
           <View style={styles.kycIconWrap}>
             <Ionicons
@@ -190,6 +238,29 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   tipText: { flex: 1, fontSize: 13.5, lineHeight: 20, color: colors.muted },
+  completenessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.brand,
+    padding: 14,
+  },
+  completenessIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: colors.brandSoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completenessTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink },
+  completenessBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
   mpesaCard: {
     flexDirection: 'row',
     alignItems: 'center',

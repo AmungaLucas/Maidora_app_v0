@@ -25,8 +25,8 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Activity tracking: last_login_at / last_active_at (§4.3) | ✅ LIVE | 1h write-throttle in `requireAuth` |
 | Location auto-update at login (§6) | ✅ LIVE | GPS fix best-effort from app; last known stands on failure |
 | Disposable email block (§12) | ✅ LIVE | signup + email-verification re-check |
-| Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); `verify()` passes on `mail.maidora.co.ke:465` |
-| Profile completeness §7 (maid_profiles + banner + editor) | ✅ LIVE | `GET/PUT /api/profile` + ProfileScreen card |
+| Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); Profile email sheet live: `POST /auth/update-email` + code entry (2026-10-29) |
+| Profile completeness §7 — BOTH roles (schema v4) | ✅ LIVE | maid: `maid_profiles` 6 checks (bio added); employer: `employer_profiles` (size/children/budget); role-aware `GET/PUT /api/profile`; HomeScreen banner FIRST then KYC (both roles); drawer nav; 3-step DOB picker |
 | M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven |
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
