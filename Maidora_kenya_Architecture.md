@@ -381,7 +381,9 @@ new columns need explicit `ALTER TABLE` verification.
 **Next up (spec §14 order):** KYC flow (§8) — screens, image pipeline
 (capture/crop/blur-glare detection), server-side drafts, review tooling,
 KES 150 urgent fee via the live M-Pesa rails · jobs listings CRUD + Find
-Jobs feed · applications + §9 welcome bonus (2 lifetime) + paywall hooks ·
+Jobs feed · applications + §9 welcome bonus (2 lifetime) + paywall (tiers
+now DECIDED via MPS Amendment v3.2 — PAYG KSh 50 / Basic KSh 99 / Gold
+KSh 199 + boosts; only multi-device session policy §15.6 still open) ·
 search/matching with location + §10 decay ranking · real chat backend ·
 §13 suggestion cards (day-based, dismissible) · push notifications.
 

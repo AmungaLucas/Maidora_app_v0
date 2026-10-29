@@ -2,9 +2,11 @@
 
 > Source of truth agreed with the product owner. Sections marked ✅ in the
 > adoption map are implemented; the rest lands in spec order (see
-> `Maidora_kenya_Architecture.md` §10 roadmap). §15 Open Items are NOT
-> assumed anywhere in code — each code decision that touches one is listed
-> under "Operative defaults" below and awaits the owner's confirmation.
+> `Maidora_kenya_Architecture.md` §10 roadmap). §15 Open Items: as of
+> 2026-10-29, six of seven are RESOLVED — the operative defaults below are
+> adopted as final and `Initial_app_deliberations.md` (Amendment v3.2)
+> supplies the paywall pricing that was deferred. Only §15.6 (multi-device
+> sessions) remains open.
 
 ## Adoption map
 
@@ -27,23 +29,30 @@
 | §12 Abuse prevention | ✅ (temp email) | `isDisposableEmail`; VoIP flagged → §15.4 |
 | §13 Post-onboarding suggestions | ⏳ | needs §7 data + day counters |
 | §14 Priority summary | order honored | gate → completeness → KYC → paywall |
-| §15 Open items | OPEN | see below |
+| §15 Open items | 6/7 RESOLVED (2026-10-29) | see Operative defaults below |
 
-## Operative defaults (pending §15 confirmations)
+## Operative defaults — RESOLVED 2026-10-29 (owner confirmed via MPS Amendment v3.2)
 
-- **§15.1 read-only scope** — implemented as: unverified users may browse
-  listings/search and view their own profile; services (apply, post, pay,
-  chat-start) are gated via `requireVerified`. Recommend adopting this list.
-- **§15.2 OTP parameters** — operative: 6-digit code, 10-minute expiry,
-  60-second resend cooldown, 5 wrong attempts per code, 5 sends per
-  phone/hour. Login-OTP and signup-OTP share the same type/purpose.
-- **§15.3 phone-first** — confirmed as built: phone OTP is THE default path;
-  email verification exists as fallback/optional.
-- **§15.4 VoIP blocking** — not implemented; Kenyan number normalization
-  (`07…/01…/+254`) already rejects foreign ranges. Recommend deferring until
-  abuse appears.
-- **§15.7 urgent-fee refund on abandonment** — recommend: no refund on
-  abandonment/cancel (fee consumed when review starts). NOT yet in code.
+- **§15.1 read-only scope — ADOPTED**: unverified users may land on home,
+  browse listings/search, and view their own profile; services (apply, post,
+  pay, chat-start) are gated via `requireVerified`.
+- **§15.2 OTP parameters — ADOPTED as built**: 6-digit code, 10-minute
+  expiry, 60-second resend cooldown, 5 wrong attempts per code, 5 sends per
+  phone/hour. Login-OTP and signup-OTP share the same type/policy.
+- **§15.3 phone-first — CONFIRMED final**: phone OTP is THE default path;
+  email verification is fallback/optional.
+- **§15.4 VoIP/disposable phone blocking — OUT OF SCOPE for v1.0** (owner
+  decision, MPS §4.8): defer until abuse appears; Kenyan normalization
+  already rejects foreign ranges.
+- **§15.5 paywall pricing — DECIDED (pending build, MPS §9/§11.1)**:
+  PAYG KSh 50/application · Maid Basic KSh 99/30d = 5 credits + Subscriber
+  tag · Maid Gold KSh 199/30d = 10 credits + 1 profile boost + 1 application
+  boost + priority visibility · profile boost KSh 99 (7 days) · application
+  boost KSh 30 · urgent KYC KSh 150. Consumption order: subscription credits
+  → banked → 2 lifetime free → PAYG.
+- **§15.6 multi-device session policy — STILL OPEN.**
+- **§15.7 urgent-fee refund — DECIDED: no refund** on rejection, abandonment,
+  or cancellation (MPS §33.3).
 
 ---
 

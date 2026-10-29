@@ -3,6 +3,7 @@
 **Document code:** MPS-AMD-1
 **Amends:** MPS v3.0
 **Rule applied:** each change references the section it modifies; appended to §42 change log.
+**Superseded in part by:** Amendment v3.2 (MPS-AMD-2, appended at the end of this file, 2026-10-29) — read §42 v3.2 for the sections this text no longer governs.
 
 All conflicts identified in review are resolved below. Where MPS v3.0 is silent or contradictory, the resolution reflects the decisions you confirmed in this thread. Items not touched remain as in v3.0.
 
@@ -609,3 +610,179 @@ These remain as v3.0 left them and are pending your direction:
 *This document doesnt supersede the already built architecture but invites a collaboration where necessary Any future amendment must reference the specific section it changes and append to the change log.*
 
 *Whatever is not clear or conflicting kindly ask for clarification, do not assume*
+
+---
+
+# Maidora MPS — Amendment v3.2 — Consolidation with built reality
+
+**Document code:** MPS-AMD-2
+**Amends:** MPS v3.0 via Amendment v3.1 (this file)
+**Date:** 2026-10-29
+**Owner instruction applied (precedence rule):** where this document conflicts with (1) what is already **built and live** in the Maidora gateway/app, or (2) the **login & verification flow already deliberated** in `docs/UNIFIED_BUILD_SPEC.md`, the built/deliberated state **wins** and this document is amended to match. Where this document adds **new** decisions, they are recorded as decisions (built later, in spec order). Nothing is silently assumed: every change below cites the section it modifies.
+
+**Sources verified line-by-line on 2026-10-29:** `backend/src/routes/auth.js`, `backend/src/services/otp.js`, `backend/src/services/email.js`, `backend/src/middleware/auth.js`, `backend/sql/schema.sql`, `backend/src/utils/validate.js`, `docs/UNIFIED_BUILD_SPEC.md`, `Maidora_kenya_Architecture.md` §1 status snapshot (all ✅ LIVE claims probe-verified).
+
+---
+
+## Summary of changes (v3.2)
+
+| # | Section | Change |
+|---|---|---|
+| 1 | §4.3 | Merge-flow rule REPLACED by built duplicate-contact behaviour (409 at submit). OTP parameters reference built defaults (§31.2 v3.2). |
+| 2 | §5.2.1 | "Read-only browsing" scoped precisely — adopts the built operative default; closes Unified Spec open item §15.1. |
+| 3 | §31 | Onboarding spine REPLACED with the built flow (role selected AFTER OTP, at onboarding — not before signup). Consents + job-type steps re-classified as future onboarding enrichment, not v1.0 build. |
+| 4 | §31.2 | OTP screen parameters REPLACED with built policy (10-min TTL, 60 s resend cooldown, 5 sends/hour, 5 attempts). Closes Unified Spec open item §15.2. |
+| 5 | §34.4 | Field spec aligned to built `maid_profiles` (`job_type` enum values; `wage_expectation` retained); `availability_*` kept but tagged not-built. |
+| 6 | §35 | Data model REPLACED where it conflicts with schema v2 (BIGINT ids, bcrypt, kyc on users, in-code blocklist). uuid/Argon2id/encrypted-columns/separate `maid_kyc` table re-classified as future hardening. |
+| 7 | §42 | Change log appended; Unified Spec open-item register updated. |
+| 8 | Decisions register (new) | Records that this document's pricing, urgent-fee and abuse-scope sections CLOSE Unified Spec open items §15.3–§15.5, §15.7. |
+
+---
+
+## §4.3 Contact model — AMENDED (v3.2)
+
+The v3.1 text stands EXCEPT the merge-flow rule, which conflicts with the built gateway:
+
+| Item | v3.1 said | BUILT (governs) |
+|---|---|---|
+| Duplicate phone/email at signup submit | "OTP proceeds normally; merge handled transparently; no error surfaced" | **`POST /auth/register` returns 409** with copy "An account with this phone/email already exists. Try logging in." and the offending `field` |
+
+**Replacement rule:** duplicate contact is blocked at form submit with a friendly error and a link to Login. Transparent merge (auto-login via OTP) is **out of scope for v1.0**; revisit only if the owner wants it (it also weakens the "one contact = one account" guarantee the login throttle relies on). Everything else in §4.3 — field list, phone primary, E.164 storage, `0712 345 678` display, contact classifier, account created at OTP send as `pending_verification` — **already matches the built gateway exactly** and stands.
+
+## §5.2.1 Contact verification gate — AMENDED (v3.2)
+
+"Read-only browsing" is now the built operative default, closing Unified Spec open item §15.1. Unverified users (neither phone nor email verified) **may**:
+
+- land on the home screen
+- browse listings and search (once those services ship)
+- view their own profile
+
+Unverified users **may not** (enforced by the live `requireVerified` middleware, currently wired on STK push; auto-attached to every write endpoint as it ships):
+
+- apply for jobs · post jobs · start chats · pay (STK push) · any other write action
+
+This scope is **adopted as final** unless the owner reopens it. KYC badge remains separate and never a gate (§5.2.2 unchanged).
+
+## §31 Onboarding spine — REPLACED (v3.2)
+
+The v3.1 spine puts the role selector before signup and consents/job-types after OTP. The **built and deliberated** flow (Unified Spec §3.2, live since the identity-v3 deploy) is authoritative and is now the spec of record:
+
+```
+1. SPLASH (animated brand splash, ≥ 2.6 s hold — built behaviour)
+        ▼
+2. SESSION CHECK → token+user+role → Tabs · token+user, role unset → RoleSelect
+        ▼
+3. WELCOME
+        ▼
+4. SIGNUP FORM — full name, email, phone, location [+ Use my current location],
+                password, confirm, referral toggle (NO role on this form)
+        ▼
+5. OTP to phone — account created as 'pending_verification' on send;
+                'active' + phone_verified_at stamped on confirm
+        ▼
+6. ROLE SELECT (onboarding) — "I'm hiring" | "I'm looking for work";
+                POST /auth/onboarding sets it ONCE, immutably
+        ▼
+7. WELCOME → HOME (role-based tabs)
+```
+
+**Why role moved after OTP (deliberated decision, restated):** signup collects one uniform form for both audiences; the role gates the correct tab set and is chosen by a fully-verified user; existing accounts are never re-onboarded.
+
+**§31 steps 6–7 of v3.1 (Legal consents; Job types + work type) are re-classified as FUTURE onboarding enrichment.** They are good product direction but are **not built** and are not part of the v1.0 identity spine. When built, they slot between step 6 and step 7 above; their field lists (§32.1/§32.2) remain the reference. `terms_accepted`/`privacy_policy_accepted` columns (§35 v3.1) follow with them.
+
+**Total: 7 screens to Home** (splash → welcome → signup → OTP → role select → home, plus the session-check gate).
+
+## §31.2 Signup form & OTP screen — AMENDED (v3.2)
+
+Signup form: unchanged (matches built `SignupScreen.js` + `POST /auth/register`, including the referral toggle and GPS button).
+
+OTP screen — built policy **replaces** the v3.1 parameters (this also closes Unified Spec open item §15.2):
+
+| Parameter | v3.1 said | BUILT (governs) |
+|---|---|---|
+| Code | 6-digit | 6-digit, crypto-random, stored SHA-256-hashed |
+| Validity | 5 minutes | **10 minutes** (`OTP_TTL_MINUTES`, default 10) |
+| Resend cooldown | 3 per 10 min, then 10-min lockout | **60-second cooldown** between sends |
+| Send rate cap | — | **5 sends per user per hour** |
+| Wrong attempts | 5 failures → 15-min lockout | **5 wrong attempts per code**, then code unusable — request a new one |
+| Login-OTP vs signup-OTP | shared type | Same `phone_otps` policy; email path (`email_otps`) mirrors it for the fallback channel |
+| Autofill | SMS Retriever enabled | **Zero-native autofill today** (iOS `textContentType`, Android `autoComplete`, clipboard paste); SMS Retriever deferred to the EAS dev build, then `OTP_APP_HASH` is appended server-side (already supported) |
+| "Get help" WhatsApp link | after 90 s | Not built — carried as future UX polish |
+
+**Adopted as final:** 6-digit · 10-minute expiry · 60 s resend cooldown · 5 attempts per code · 5 sends/hour.
+
+## §34.4 Profile completeness field spec — AMENDED (v3.2)
+
+Aligned to the built `maid_profiles` (schema v2). Changes only where v3.1 conflicts:
+
+| Item | v3.1 said | BUILT (governs) |
+|---|---|---|
+| Work-type field + enum | `work_type` enum(`live_in`,`live_out`,`part_time`,`full_time`) | **`job_type` enum(`live_in`,`live_out`,`day_burg`)** — "day burg" is the built third value; part-time/full-time split is future scope |
+| Wage | absent from v3.1 field spec | **`wage_expectation` (KES, optional) retained** — it is built, it feeds a suggestion card ("Add wage expectation"), and employers filter on it |
+| `availability_status` / `availability_date` | required at signup | **Kept as spec, tagged NOT-BUILT** — columns do not exist yet; lands with jobs/search phase, not signup |
+| `primary_job_types[]` / `other_job_type` | required at signup | Kept as spec, tagged NOT-BUILT (arrays of job types replace the single `job_type` later; single column governs until then) |
+| Completeness set | 13 fields | **Built §7 set governs the banner today:** DOB, languages, job type, years of experience, next of kin (name/phone/relationship) — derived at read, never stored; everything else in this table arrives with its feature |
+
+Next-of-kin privacy (never shown to employers; consent affirmation) and references-replaced-by-next-of-kin: **unchanged, good to build as written.**
+
+## §35 Data model — AMENDED (v3.2)
+
+v3.1's §35 conflicts with the live schema v2 in several places. **Schema v2 governs.** Verified live DDL (`backend/sql/schema.sql`, mirrored on the production DB via idempotent `migrate_v2.js`):
+
+| Item | v3.1 said | BUILT (governs) |
+|---|---|---|
+| Primary keys | `uuid` | **`BIGINT UNSIGNED AUTO_INCREMENT`** |
+| Password hashing | Argon2id | **bcrypt (bcryptjs, cost 10)** |
+| KYC storage | separate `maid_kyc` table with encrypted columns | **`kyc_*` columns on `users`** (`kyc_status` enum incl. `draft`, `kyc_rejection_reason` locked enum, `kyc_submitted_at`, `kyc_reviewed_at`) |
+| Referral columns | `referral_code` + `referred_by_code` | **`my_referral_code`** (system-generated at signup) + `referred_by_code` — same semantics, built names |
+| Location columns | `area, county, device_lat, device_lng` on profile | **`location_name` / `location_area` / `location_county` / `location_source` / `latitude` / `longitude` on `users`** |
+| Email blocklist | `email_blocklist` table + admin console | **In-code blocklist (38 domains) in `validate.js`, checked at signup + email verification** — table + admin console = future |
+| Consent / `onboarding_step` / `payer_phone` columns | present | Not built — arrive with onboarding-enrichment (§31 v3.2) and payments-for-services phases |
+| `credit_ledger` buckets | 2 lifetime free credits consumed last | Semantics **adopted as the design of record** for the paywall build (Unified Spec §9); nothing credit-related exists in the DB yet |
+
+**Re-classified as future hardening (not v1.0 block):** uuid PKs, Argon2id migration, column-level encryption for `id_number`/DOB/next-of-kin phone, separate `maid_kyc` table, `email_blocklist` table. These are worthwhile but are refactors, not product gaps; the built schema already satisfies every v1.0 flow.
+
+**Adopted as design-of-record (to build):** `maid_kyc`-style review metadata (reviewer_id, urgent flags, draft_updated_at) extends the users columns when the KYC flow ships · credit buckets and consumption order (`maid_sub_credits` → `maid_banked_credits` → `maid_free_credits` → PAYG KSh 50) · `email_blocklist` table when the admin console exists.
+
+## Decisions register — Unified Spec §15 open items (v3.2)
+
+This amendment + the built system close six of the seven open items:
+
+| Unified Spec open item | Resolution | Source |
+|---|---|---|
+| §15.1 read-only scope for unverified users | **CLOSED** — home + browse/search + own profile; all write actions gated | §5.2.1 v3.2 (built `requireVerified`) |
+| §15.2 OTP parameters | **CLOSED** — 6-digit · 10 min · 60 s resend · 5 attempts · 5/hour; shared policy for signup/login channels | §31.2 v3.2 (built `otp.js`) |
+| §15.3 phone-first final | **CLOSED** — phone OTP is THE default path; email is fallback/optional | §4.3 (both amendments agree); built |
+| §15.4 disposable/VoIP phone blocking | **CLOSED for v1.0** — out of scope (flagged, revisit on abuse evidence); foreign number ranges already rejected by E.164 normalization | §4.8 |
+| §15.5 paywall pricing & tiers | **CLOSED as decision, pending build** — PAYG KSh 50 · Basic KSh 99/30d (5 credits + Subscriber tag) · Gold KSh 199/30d (10 credits + 1 profile boost + 1 application boost + priority visibility) · profile boost KSh 99/7d · application boost KSh 30 · urgent KYC KSh 150 | §9 / §11.1 / §12.1 (v3.1) |
+| §15.6 multi-device session policy | **STILL OPEN** — not addressed by this document; built behaviour is 30-day sliding token refreshed on use, logout does not end other sessions | — |
+| §15.7 urgent KYC fee refund path | **CLOSED** — no refund on rejection, abandonment, or cancellation | §33.3 (v3.1) |
+
+## Still open / needs the owner (v3.2)
+
+Carried from this document's own "not changed" list, plus what the consolidation surfaced:
+
+1. **MPS v3.0 base text is not in the repo.** This file amends it by reference, so sections it cites (chat §15/§29, chat-initiation §26, boosts/rollover, penalty magnitude) can't be reviewed against reality. Commit `MPS_v3.0.md` to the repo so future amendments can cite exact text.
+2. Multi-device session policy (§15.6 above) — decide whether logging out on one device should end other sessions.
+3. Subscriptions/boosts v1.0 scope — pricing is now decided (§9), but confirm v1.0 ships credits+subscriptions before or after jobs/applications (spec order implies after — applications first).
+4. Under-18 policy — pending Kenyan legal counsel; KYC block rule noted in §39.1 stands as written.
+5. Behavioural penalty magnitude ("Moderate") — needs a number when ranking ships.
+6. Employer "last seen" label context (§18.4) — employer-facing profile last-seen not specified.
+7. OTP parameters for recovery/contact-change flows — enumerated only for signup/login; extend when those flows are specced.
+
+## §42 Change log — v3.2 appended
+
+### v3.2 — 2026-10-29 (Amendment 2 — consolidation with built reality)
+
+| # | Section | Resolution |
+|---|---|---|
+| D1 | §4.3 | Merge flow replaced by built 409 duplicate-contact block; merge re-classified out of v1.0. |
+| D2 | §5.2.1 | Read-only scope fixed to the built operative default; closes Unified Spec §15.1. |
+| D3 | §31 | Onboarding spine replaced with built flow (role at onboarding, after OTP); consents + job-type steps tagged future; splash hold corrected to ≥ 2.6 s. |
+| D4 | §31.2 | OTP parameters replaced with built policy; closes Unified Spec §15.2. |
+| D5 | §34.4 | Field spec aligned to built `maid_profiles` (job_type enum, wage_expectation retained); availability_* tagged not-built. |
+| D6 | §35 | Data model aligned to schema v2 (BIGINT, bcrypt, kyc on users, built location/referral names, in-code blocklist); uuid/Argon2id/encryption/separate-table re-classified as future hardening; credit-ledger semantics adopted as design-of-record. |
+| D7 | Decisions register | Unified Spec §15.3–§15.5, §15.7 closed; §15.6 still open; 7 owner items listed. |
+| D8 | §42 | This change log. |
+
+**Rule for future amendments (unchanged):** reference the specific section changed, append to §42, and never contradict the precedence rule — built-and-live first, deliberated login/verification flow second, this document's product decisions third, MPS v3.0 base text for everything untouched.

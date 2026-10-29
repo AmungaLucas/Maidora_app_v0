@@ -6,6 +6,37 @@
 
 ---
 
+## 2026-10-29 — MPS deliberations doc consolidated (Amendment v3.2) + spec §15 register closed
+
+The owner's "initial deliberations doc" landed on GitHub as
+`Initial_app_deliberations.md` (MPS-AMD-1, Amendment v3.1 to MPS v3.0).
+Read end-to-end and consolidated per the owner's precedence rule:
+**built-and-live first, deliberated login/verification flow second, product
+decisions recorded, nothing assumed.**
+
+- **Amendment v3.2 (MPS-AMD-2) appended to the deliberations doc.** Conflicts
+  with built reality corrected at source, each citing its section:
+  merge-flow rule → built 409 duplicate-contact block (§4.3) · OTP params →
+  built policy 6-digit/10-min/60s/5-att/5-hr (§31.2) · onboarding spine →
+  built flow with role at onboarding AFTER OTP, consents+job-types tagged
+  future (§31) · profile fields → built `job_type` enum + `wage_expectation`
+  retained, `availability_*` tagged not-built (§34.4) · data model → schema
+  v2 governs (BIGINT, bcryptjs, kyc on users, in-code blocklist); uuid/
+  Argon2id/encryption/separate-table re-classified future hardening (§35).
+- **Decisions register added** — six of seven Unified Spec §15 open items
+  CLOSED: §15.1 read-only scope, §15.2 OTP params, §15.3 phone-first,
+  §15.4 VoIP out of scope v1.0, §15.5 pricing (NEW: PAYG 50 / Basic 99 /
+  Gold 199 + boosts — was deferred), §15.7 urgent fee never refunded.
+  §15.6 multi-device sessions still open. Registered in
+  `docs/UNIFIED_BUILD_SPEC.md` operative defaults + architecture §10.
+- **Flagged for owner (7 items)** — most notably: MPS v3.0 base text is not
+  in the repo (amendment cites it by reference); subscriptions-before/after-
+  applications sequencing; under-18 legal.
+- Verified backend sources before amending: `auth.js` (register 409s),
+  `otp.js` (caps), `schema.sql` (types/enums), `email.js` (SMTP shape).
+
+---
+
 ## 2026-10-29 — Email path activated (SMTP_PASS installed + verified)
 
 Completes spec §2 / adoption map "wired, pass pending" → **live**.
