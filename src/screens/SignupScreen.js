@@ -1,16 +1,16 @@
-// Signup — creates the account, then hands off to OTP verification.
-// Role arrives as a param and is IMMUTABLE once the account is created.
+// Signup — creates the account (no role here), then hands off to OTP.
+// Role is chosen at ONBOARDING, after phone verification (spec §3.2) —
+// the server ignores any role sent from this screen.
 import React, { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, ApiError } from '../api';
 import { useApp } from '../context/AppContext';
 import { captureCurrentLocation } from '../location';
-import { ROLES, LINKS, colors, radius } from '../theme';
+import { LINKS, colors, radius } from '../theme';
 import { validateSignup } from '../validation';
-import { Banner, PrimaryButton, RoleChip, Screen, TextField } from '../ui';
+import { Banner, PrimaryButton, Screen, TextField } from '../ui';
 
-export default function SignupScreen({ navigation, route }) {
-  const role = route?.params?.role || 'employer';
+export default function SignupScreen({ navigation }) {
   const { setPendingReg } = useApp();
 
   const [form, setForm] = useState({
@@ -62,20 +62,19 @@ export default function SignupScreen({ navigation, route }) {
         fullName: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
-        role,
         password: form.password,
         confirmPassword: form.confirmPassword,
         locationName: form.locationName.trim(),
         latitude: coords ? coords.latitude : undefined,
         longitude: coords ? coords.longitude : undefined,
+        locationSource: coords ? 'gps' : 'manual',
         referralCode: form.referralCode.trim() || undefined,
       });
-      // Role is permanent from this point on.
+      // Role is NOT set here — onboarding asks after OTP verification.
       await setPendingReg({
         userId: res.userId,
         phone: res.phone,
         maskedPhone: res.maskedPhone,
-        role: res.role,
         otpSent: res.otpSent !== false,
         expiresAt: Date.now() + 30 * 60 * 1000,
       });
@@ -92,14 +91,10 @@ export default function SignupScreen({ navigation, route }) {
 
   return (
     <Screen>
-      <RoleChip
-        label={ROLES[role]}
-        onChange={() => navigation.navigate('RoleSelect', { currentRole: role })}
-      />
-
       <Text style={styles.title}>Create your account</Text>
       <Text style={styles.subtitle}>
-        We will send a 6-digit code to your phone to verify it.
+        We will send a 6-digit code to your phone to verify it. You will pick
+        whether you are hiring or looking for work right after.
       </Text>
 
       <View style={{ marginTop: 20 }}>

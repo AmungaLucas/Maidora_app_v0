@@ -69,16 +69,31 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
 }
 
 export const api = {
-  // POST /auth/register — creates the account, sends the 6-digit SMS OTP
+  // POST /auth/register — creates the account (no role yet), sends the 6-digit SMS OTP
   register: (payload) => request('/auth/register', { method: 'POST', body: payload }),
   // POST /auth/verify-otp — { userId, code } -> { token, user }
   verifyOtp: (payload) => request('/auth/verify-otp', { method: 'POST', body: payload }),
   // POST /auth/resend-otp — { userId }
   resendOtp: (payload) => request('/auth/resend-otp', { method: 'POST', body: payload }),
-  // POST /auth/login — { identifier, password }
+  // POST /auth/login — { identifier, password, location? }
   login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
-  // GET /auth/me — validates a stored token
+  // GET /auth/me — validates a stored token; returns a refreshed 30d token
   me: (token) => request('/auth/me', { token }),
+  // POST /auth/onboarding — { role } chosen post-verification, immutable after
+  onboarding: (role, token) =>
+    request('/auth/onboarding', { method: 'POST', body: { role }, token }),
+  // POST /auth/request-email-verification — optional email path (SMTP)
+  requestEmailVerification: (token) =>
+    request('/auth/request-email-verification', { method: 'POST', token }),
+  // POST /auth/verify-email — { code }
+  verifyEmail: (code, token) =>
+    request('/auth/verify-email', { method: 'POST', body: { code }, token }),
+
+  // GET /profile — maid profile + derived completeness (§7)
+  getProfile: (token) => request('/profile', { token }),
+  // PUT /profile — upsert the completeness fields
+  saveProfile: (payload, token) =>
+    request('/profile', { method: 'PUT', body: payload, token }),
 
   // POST /payments/stk-push — { amount, phone?, purpose? } -> { paymentId, checkoutRequestId, message }
   mpesaStkPush: (payload, token) =>

@@ -7,7 +7,7 @@
 //   POST /api/payments/callback   Safaricom C2B callback       (public, ACKs fast)
 const express = require('express');
 const { pool } = require('../config/db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireVerified } = require('../middleware/auth');
 const mpesa = require('../services/mpesa');
 const { normalizePhone } = require('../utils/validate');
 
@@ -60,7 +60,9 @@ function paymentView(p) {
 }
 
 // POST /api/payments/stk-push
-router.post('/stk-push', requireAuth, async (req, res, next) => {
+// §5 verification gate — spending money is a platform service; unverified
+// accounts must clear phone/email verification first. Browsing stays open.
+router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) => {
   try {
     if (!mpesa.isConfigured()) {
       return res.status(503).json({ message: 'M-Pesa is not configured yet. Try again later.' });

@@ -1,6 +1,7 @@
 // OTP verification — 6-digit SMS code.
 // Reads pendingReg from context so it survives an app restart (pending userId
-// stored at /register time). On success the session starts and role is locked.
+// stored at /register time). On success the session starts; if the role is
+// still unset the user continues to onboarding (RoleSelect) — spec §3.2.
 //
 // Autofill (zero native modules — works in Expo Go and any build):
 //   1. iOS     — textContentType="oneTimeCode" (keyboard suggests the SMS code)
@@ -54,7 +55,11 @@ export default function OtpScreen({ navigation }) {
       const res = await api.verifyOtp({ userId: pendingReg.userId, code: value });
       await setPendingReg(null);
       await signIn(res.token, res.user);
-      navigation.reset({ index: 0, routes: [{ name: tabsRouteFor(res.user) }] });
+      // No role yet → onboarding asks who you are (employer / househelp).
+      navigation.reset({
+        index: 0,
+        routes: [res.user && res.user.role ? { name: tabsRouteFor(res.user) } : { name: 'RoleSelect' }],
+      });
     } catch (e) {
       setCode('');
       submittedRef.current = '';

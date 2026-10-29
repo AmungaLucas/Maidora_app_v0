@@ -18,8 +18,17 @@ function generateCode() {
 
 // Creates the OTP row and returns the plaintext code (caller sends the SMS).
 async function issueOtp(userId) {
+  return issueOtpOnTable('phone_otps', userId);
+}
+
+// Same policy against email_otps — the optional email-verification path (§5).
+async function issueEmailOtp(userId) {
+  return issueOtpOnTable('email_otps', userId);
+}
+
+async function issueOtpOnTable(table, userId) {
   const [[last]] = await pool.query(
-    'SELECT created_at FROM phone_otps WHERE user_id = ? ORDER BY id DESC LIMIT 1',
+    `SELECT created_at FROM ${table} WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
     [userId]
   );
   if (last) {
@@ -43,7 +52,7 @@ async function issueOtp(userId) {
 
   const code = generateCode();
   await pool.query(
-    'INSERT INTO phone_otps (user_id, code_hash, expires_at) VALUES (?, ?, (NOW() + INTERVAL ? MINUTE))',
+    `INSERT INTO ${table} (user_id, code_hash, expires_at) VALUES (?, ?, (NOW() + INTERVAL ? MINUTE))`,
     [userId, hashCode(userId, code), TTL_MINUTES]
   );
   return code;
@@ -51,8 +60,16 @@ async function issueOtp(userId) {
 
 // Verifies and consumes the newest active OTP for the user.
 async function verifyOtpCode(userId, code) {
+  return verifyOtpOnTable('phone_otps', userId, code);
+}
+
+async function verifyEmailOtpCode(userId, code) {
+  return verifyOtpOnTable('email_otps', userId, code);
+}
+
+async function verifyOtpOnTable(table, userId, code) {
   const [[row]] = await pool.query(
-    'SELECT * FROM phone_otps WHERE user_id = ? AND consumed_at IS NULL ORDER BY id DESC LIMIT 1',
+    `SELECT * FROM ${table} WHERE user_id = ? AND consumed_at IS NULL ORDER BY id DESC LIMIT 1`,
     [userId]
   );
   if (!row) {
@@ -89,4 +106,12 @@ function otpSmsMessage(code) {
     : `${base} Do not share this code.`;
 }
 
-module.exports = { issueOtp, verifyOtpCode, hashCode, generateCode, otpSmsMessage };
+module.exports = {
+  issueOtp,
+  verifyOtpCode,
+  issueEmailOtp,
+  verifyEmailOtpCode,
+  hashCode,
+  generateCode,
+  otpSmsMessage,
+};

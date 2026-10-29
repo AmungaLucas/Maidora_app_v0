@@ -34,6 +34,27 @@ const config = {
     appHash: (process.env.OTP_APP_HASH || '').trim(),
   },
 
+  // §11 login throttle — 5 failures/account/15min → 15min cooldown; 20 attempts/IP/hour.
+  login: {
+    maxFailsPerWindow: Number(process.env.LOGIN_MAX_FAILS || 5),
+    failWindowMinutes: Number(process.env.LOGIN_FAIL_WINDOW_MIN || 15),
+    cooldownMinutes: Number(process.env.LOGIN_COOLDOWN_MIN || 15),
+    maxPerIpPerHour: Number(process.env.LOGIN_MAX_PER_IP_HOUR || 20),
+  },
+
+  // §2 — SMTP for the optional email-verification path (mail.maidora.co.ke).
+  // SMTP_PASS lives ONLY in the server .env (rotated credential — never in
+  // the repo). When host/user/pass are unset the email service fails soft
+  // and phone verification remains the default path.
+  smtp: {
+    host: process.env.SMTP_HOST || '',
+    port: Number(process.env.SMTP_PORT || 465),
+    secure: String(process.env.SMTP_SECURE ?? '1') === '1',
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
+  },
+
   // Safaricom Daraja — M-Pesa STK Push (Lipa na M-Pesa Online, production)
   mpesa: {
     baseUrl: process.env.MPESA_BASE_URL || 'https://api.safaricom.co.ke',

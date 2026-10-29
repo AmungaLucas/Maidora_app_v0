@@ -1,4 +1,5 @@
-// Server-side validation — mirrors the mobile app's src/validation.js exactly.
+// Server-side validation — mirrors the mobile app's src/validation.js exactly
+// (keep both in sync).
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 function normalizePhone(raw) {
@@ -7,6 +8,27 @@ function normalizePhone(raw) {
   return m ? `+254${m[1]}` : null;
 }
 
+// §12 — temporary/disposable email domains, blocked at signup, on email
+// change, and re-checked at email-verification time (blocklists change).
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'mailinator.com', '10minutemail.com', 'guerrillamail.com', 'sharklasers.com',
+  'grr.la', 'yopmail.com', 'tempmail.com', 'temp-mail.org', 'throwawaymail.com',
+  'getnada.com', 'dispostable.com', 'maildrop.cc', 'mailnesia.com',
+  'trashmail.com', 'fakeinbox.com', 'spam4.me', 'tempr.email', 'discard.email',
+  '1secmail.com', '1secmail.org', '1secmail.net', 'mohmal.com', 'emailondeck.com',
+  'mailcatch.com', 'tempinbox.com', 'mytemp.email', 'burnermail.io', 'mail7.io',
+  'linshiyouxiang.net', 'bccto.me', 'chacuo.net', 'mailsac.com', 'inboxkitten.com',
+  'tempmail.plus', 'moakt.com', 'tmail.ws', 'smtpbox.org', 'mailpoof.com',
+]);
+
+function isDisposableEmail(email) {
+  const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
+  return DISPOSABLE_EMAIL_DOMAINS.has(domain);
+}
+
+// NOTE: role is intentionally NOT part of signup anymore — it is chosen at
+// onboarding, after phone verification (unified spec §3.2), and is immutable
+// once set.
 function validateRegister(body) {
   const errors = {};
   const b = body || {};
@@ -21,14 +43,12 @@ function validateRegister(body) {
   const email = String(b.email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(email) || email.length > 190) {
     errors.email = 'Enter a valid email address.';
+  } else if (isDisposableEmail(email)) {
+    errors.email = 'This email provider is not accepted. Please use a different email.';
   }
 
   const phone = normalizePhone(b.phone);
   if (!phone) errors.phone = 'Enter a valid Kenyan number, e.g. 0712 345 678.';
-
-  if (!['employer', 'househelp'].includes(b.role)) {
-    errors.role = 'Choose a role.';
-  }
 
   const password = String(b.password || '');
   if (password.length < 8) errors.password = 'Password must be at least 8 characters.';
@@ -54,11 +74,24 @@ function validateRegister(body) {
     else lng = v;
   }
 
+  const locationArea = b.locationArea ? String(b.locationArea).trim().slice(0, 120) || null : null;
+  const locationCounty = b.locationCounty ? String(b.locationCounty).trim().slice(0, 120) || null : null;
+  const locationSource = b.locationSource === 'gps' || b.locationSource === 'manual'
+    ? b.locationSource
+    : (lat !== null && lng !== null ? 'gps' : null);
+
   const referralCode = b.referralCode
     ? String(b.referralCode).trim().toUpperCase().slice(0, 24) || null
     : null;
 
-  return { errors, values: { fullName, email, phone, role: b.role, password, locationName, lat, lng, referralCode } };
+  return {
+    errors,
+    values: {
+      fullName, email, phone, password,
+      locationName, locationArea, locationCounty, locationSource, lat, lng,
+      referralCode,
+    },
+  };
 }
 
-module.exports = { validateRegister, normalizePhone, EMAIL_RE };
+module.exports = { validateRegister, normalizePhone, EMAIL_RE, isDisposableEmail, DISPOSABLE_EMAIL_DOMAINS };

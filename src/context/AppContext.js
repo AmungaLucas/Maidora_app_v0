@@ -69,9 +69,11 @@ export function AppProvider({ children }) {
         }
         setPendingRegState(pending);
       },
-      updateUser: async (patch) => {
+      updateUser: async (patch, newToken) => {
+        // `patch` may be a partial update OR a full user object (from /auth/me).
         const next = { ...user, ...patch };
-        await storage.saveSession(token, next);
+        await storage.saveSession(newToken || token, next);
+        if (newToken) setToken(newToken);
         setUser(next);
       },
     }),

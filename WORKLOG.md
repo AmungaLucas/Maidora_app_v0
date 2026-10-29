@@ -6,6 +6,49 @@
 
 ---
 
+## 2026-10-29 — Identity & verification foundation (unified spec Phase 1)
+
+Implements spec priorities #1 (verification gate) and #2 (profile
+completeness) per `docs/UNIFIED_BUILD_SPEC.md` (new file — the adopted
+unified build spec, with an adoption map + operative §15 defaults).
+
+- **Schema v2** (`sql/schema.sql` + `sql/migrate_v2.js`, idempotent): users
+  gains `account_status` (pending_verification→active→suspended/deactivated/
+  deleted), `phone_verified_at`/`email_verified_at` (timestamps replace the
+  boolean), `kyc_*` columns, `last_login_at`/`last_active_at`,
+  `location_area`/`location_county`/`location_source`, `role` becomes NULL-able
+  (onboarding sets it), `referral_code` renamed `referred_by_code`. New tables:
+  `maid_profiles` (§7), `login_attempts` (§11), `email_otps`. Old `status` and
+  `phone_verified` columns migrated + dropped.
+- **Role moved to onboarding** (spec §3.2): register no longer takes a role;
+  new `POST /api/auth/onboarding` (JWT) sets it once, immutably. App flow:
+  Welcome → Signup (no role) → OTP → RoleSelect (onboarding mode) → Tabs.
+  Existing accounts keep their role — no re-onboarding.
+- **Verification gate** (§5): `requireVerified` middleware (phone OR email
+  verified + active account), wired on `POST /payments/stk-push`; job
+  apply/post/chat-start will attach it when those endpoints exist.
+- **Login rules** (§11): 5 failures/account/15min → 15-min cooldown; per-IP
+  20/hour; both backed by `login_attempts`. `/auth/me` now returns a
+  REFRESHED 30d token (sliding session) + current user shape.
+- **Activity tracking** (§4.3): `last_login_at` on auth; `last_active_at` on
+  every authenticated request, write-throttled to 1h in `requireAuth`.
+- **Location at login** (§6): app sends a best-effort GPS fix (6s cap, silent
+  failure); server updates coords + reverse-geocoded name, keeps last known
+  location on failure.
+- **Disposable email block** (§12): 38-domain blocklist checked at signup and
+  re-checked at email verification.
+- **Email path** (§2/§5): `services/email.js` (nodemailer) +
+  `POST /auth/request-email-verification` + `/auth/verify-email` (OTP in
+  `email_otps`). Fails soft until `SMTP_PASS` is set in the server `.env`
+  (rotated credential — owner to supply). No UI for email verify yet.
+- **Profile completeness** (§7): `GET/PUT /api/profile` (househelp),
+  completeness derived at read (5 fields); ProfileScreen gains a
+  non-blocking "Profile strength" card + inline editor (DOB, languages chips,
+  job type, years, wage, next of kin). Photo deliberately deferred to KYC
+  phase (upload pipeline).
+- App boot gate: signed-in user with unset role lands on RoleSelect
+  (onboarding). `/auth/me` refresh stored once per cold start (loop guard).
+
 ## 2026-10-29 — Documentation system + full status audit
 
 - Created `Maidora_kenya_Architecture.md` (app + gateway + infra + M-Pesa

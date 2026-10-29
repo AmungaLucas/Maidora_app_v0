@@ -1,4 +1,6 @@
 // Welcome — first-install onboarding entry.
+// Role is chosen AFTER verification (onboarding), so Get Started goes
+// straight to Signup (unified spec §3.2).
 import React from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import BrandLockup from '../components/brand/BrandLockup';
@@ -26,7 +28,7 @@ export default function WelcomeScreen({ navigation }) {
       </View>
 
       <View style={styles.footer}>
-        <PrimaryButton title="Get Started" onPress={() => go('RoleSelect')} />
+        <PrimaryButton title="Get Started" onPress={() => go('Signup')} />
         <Pressable onPress={() => go('Login')} style={styles.loginLink}>
           <Text style={styles.loginLinkText}>I already have an account</Text>
         </Pressable>

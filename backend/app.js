@@ -3,15 +3,16 @@
 //
 // Structure:
 //   src/config     env loading, MySQL pool
-//   src/routes     health, auth, payments (mounted below)
-//   src/services   otp, sms (TalkSasa), mpesa (Daraja)
-//   src/middleware JWT auth
+//   src/routes     health, auth, profile, payments (mounted below)
+//   src/services   otp, sms (TalkSasa), mpesa (Daraja), email (SMTP)
+//   src/middleware JWT auth + verification gate
 //   src/utils      validation (mirrors the mobile app)
 const express = require('express');
 const config = require('./src/config');
 const healthRoutes = require('./src/routes/health');
 const authRoutes = require('./src/routes/auth');
 const paymentsRoutes = require('./src/routes/payments');
+const profileRoutes = require('./src/routes/profile');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -20,6 +21,7 @@ app.use(express.json({ limit: '256kb' }));
 app.use('/api', healthRoutes); // /api/health (contract monitored externally), /api/db-health
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/profile', profileRoutes);
 
 // 404
 app.use((req, res) => {

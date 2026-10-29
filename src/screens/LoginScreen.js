@@ -1,8 +1,11 @@
 // Login — email OR phone + password.
+// §6: best-effort GPS capture at login updates the stored location (a denied
+// permission or a failed fix changes nothing — last known location stands).
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
+import { captureCurrentLocation } from '../location';
 import { tabsRouteFor } from '../navigation/Tabs';
 import { colors, radius } from '../theme';
 import { isValidEmail, isValidPhone } from '../validation';
@@ -21,23 +24,45 @@ export default function LoginScreen({ navigation }) {
     [identifier, password]
   );
 
+  // §6 — location auto-update at login. Silent + best-effort: never blocks
+  // the login and never shows an error; permission prompts only appear if
+  // the OS still owes one.
+  const captureLoginLocation = async () => {
+    try {
+      const result = await Promise.race([
+        captureCurrentLocation(),
+        new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
+      ]);
+      if (!result) return undefined;
+      return {
+        latitude: result.latitude,
+        longitude: result.longitude,
+        locationName: result.locationName || undefined,
+        locationSource: 'gps',
+      };
+    } catch {
+      return undefined; // GPS denied/off — keep last known location
+    }
+  };
+
   const submit = async () => {
     setTouched(true);
     if (!canSubmit || submitting) return;
     setSubmitting(true);
     setErrorMessage('');
     try {
+      const location = await captureLoginLocation();
       const res = await api.login({
         identifier: identifier.trim(),
         password,
+        location,
       });
       if (res.requiresVerification) {
-        // Phone not verified yet — route into the OTP flow.
+        // Phone not verified yet — route into the OTP flow (§3.3).
         await setPendingReg({
           userId: res.userId,
           phone: res.phone || null,
           maskedPhone: res.maskedPhone || null,
-          role: res.role || null,
           otpSent: res.otpSent !== false,
           expiresAt: Date.now() + 30 * 60 * 1000,
         });
@@ -45,6 +70,11 @@ export default function LoginScreen({ navigation }) {
         return;
       }
       await signIn(res.token, res.user);
+      if (!res.user.role) {
+        // Verified but never onboarded → pick the role now (§3.2).
+        navigation.reset({ index: 0, routes: [{ name: 'RoleSelect' }] });
+        return;
+      }
       navigation.reset({ index: 0, routes: [{ name: tabsRouteFor(res.user) }] });
     } catch (e) {
       setErrorMessage(e.message || 'Could not log you in. Please try again.');
@@ -93,7 +123,7 @@ export default function LoginScreen({ navigation }) {
       <PrimaryButton title="Log In" onPress={submit} disabled={!canSubmit} loading={submitting} />
 
       <Pressable
-        onPress={() => navigation.navigate('RoleSelect')}
+        onPress={() => navigation.navigate('Signup')}
         style={styles.signupRow}
         hitSlop={8}
       >

@@ -34,11 +34,13 @@ https://docs.expo.dev/versions/v58.0.0/
 
 ## App flow (implemented)
 
-First install: Splash → Welcome → RoleSelect (Employer/Househelp) →
-Signup → OTP (SMS, 6 digits) → role-based bottom tabs.
+First install: Splash → Welcome → Signup (NO role) → OTP (SMS, 6 digits) →
+RoleSelect (onboarding — role chosen here, immutable once set) → role-based
+bottom tabs.
 
-Later launches: Splash → gate on stored state — signed in → tabs; not signed
-in → Login; onboarding incomplete → Welcome; pending OTP registration → OTP.
+Later launches: Splash → gate on stored state — signed in with role → tabs;
+signed in without role → RoleSelect (onboarding); not signed in → Login;
+onboarding seen → Welcome skipped; pending OTP registration → OTP.
 
 ### Bottom tabs (role-based)
 
@@ -49,19 +51,22 @@ in → Login; onboarding incomplete → Welcome; pending OTP registration → OT
 
 ### Rules baked into the code — keep them true
 
-- **Role is immutable after account creation.** No endpoint accepts a role
-  update; the only client surface is Settings → "Change my role" → explainer
-  sheet → manual review by the team.
-- Role before signup is a free param: RoleSelect pre-selects `currentRole`
-  when reached from the Signup "Change" link (chip: "Signing up as: X · Change").
+- **Role is chosen at ONBOARDING, after phone verification (spec §3.2) —
+  and is immutable once set.** No endpoint accepts a role change; the only
+  client surface is Settings → "Change my role" → explainer sheet → manual
+  review by the team. Signup never sends a role; the server ignores one.
 - Signup validation mirrors the server exactly (see `src/validation.js` vs
-  gateway `src/validate.js`): password ≥ 8 chars, valid email, Kenyan phone
-  (`07…`, `01…`, `+2547…`, `+2541…` → normalized to `+2547…`/`+2541…`).
+  gateway `src/utils/validate.js`): password ≥ 8 chars, valid email
+  (disposable domains blocked), Kenyan phone (`07…`, `01…`, `+2547…`,
+  `+2541…` → normalized to `+2547…`/`+2541…`).
 - The pending `userId` from `POST /auth/register` is persisted
   (`@maidora/pendingRegistration`) so the OTP screen survives app restarts.
 - Primary buttons stay disabled until the form is valid — no dead-end API errors.
 - Referral entry is a collapsed text link ("Have a referral code?").
 - Terms/Privacy links sit directly above the Create Account button.
+- Verification gate (spec §5): service endpoints (STK push today; job
+  apply/post/chat-start later) require phone OR email verification —
+  `requireVerified` on the gateway; browsing stays open.
 
 ## Backend (gateway)
 
@@ -77,14 +82,17 @@ app.js                  entry — mounts routers
 src/config/index.js     env loading (dotenv) + typed config sections
 src/config/db.js        MySQL pool
 src/routes/health.js    /api/health (stable contract), /api/db-health
-src/routes/auth.js      /api/auth/register|verify-otp|resend-otp|login|me
+src/routes/auth.js      /api/auth/register|verify-otp|resend-otp|login|onboarding|me|email verification
+src/routes/profile.js   /api/profile (GET/PUT maid profile + §7 completeness)
 src/routes/payments.js  /api/payments/stk-push|:id|callback, /api/payments
-src/services/otp.js     hashed OTP storage, cooldowns/caps, SMS template
+src/services/otp.js     hashed OTP storage (phone + email), cooldowns/caps, SMS template
 src/services/sms.js     TalkSasa client
+src/services/email.js   nodemailer SMTP (optional email verification, fails soft)
 src/services/mpesa.js   Safaricom Daraja: OAuth cache, STK Push, STK Query
-src/middleware/auth.js  requireAuth (JWT Bearer)
-src/utils/validate.js   validation (mirrors src/validation.js on mobile)
-sql/schema.sql          users, phone_otps, payments (idempotent, IF NOT EXISTS)
+src/middleware/auth.js  requireAuth (JWT + last_active_at) + requireVerified (§5 gate)
+src/utils/validate.js   validation + disposable-email blocklist (mirrors src/validation.js on mobile)
+sql/schema.sql          v2 canonical DDL (idempotent, IF NOT EXISTS)
+sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs)
 ```
 
 ### M-Pesa (LIVE — Daraja production STK Push)
@@ -136,9 +144,11 @@ sql/schema.sql          users, phone_otps, payments (idempotent, IF NOT EXISTS)
   `getAppHashAsync()`, set `OTP_APP_HASH` in the server `.env` — the gateway
   already appends it to every OTP SMS (`src/services/otp.js`).
 
-SMS OTP via TalkSasa (`bulksms.talksasa.com/api/v3`). Password-reset email via
-nodemailer is planned (credentials pending) — the Forgot Password screen is a
-placeholder until then.
+SMS OTP via TalkSasa (`bulksms.talksasa.com/api/v3`). Optional email
+verification via nodemailer SMTP (`mail.maidora.co.ke`,
+`verification@maidora.co.ke`) is wired server-side — it activates when the
+rotated `SMTP_PASS` is set in the server `.env`. The Forgot Password screen
+is still a placeholder until a reset flow (email or SMS) is designed.
 
 ## Conventions
 

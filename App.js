@@ -1,15 +1,16 @@
 // Maidora Kenya — root navigation.
 //
-// Flow (per spec):
-//   First install : Splash -> Welcome -> RoleSelect -> Signup -> OTP -> Home
+// Flow (per unified spec §3.2 — role is chosen at ONBOARDING, not signup):
+//   First install : Splash -> Welcome -> Signup -> OTP -> RoleSelect (onboarding) -> Home
 //   Later launch  : Splash -> (auth + onboarding check)
-//                     signed in            -> Home
-//                     not signed in        -> Login
-//                     onboarding pending   -> Welcome
-//                   pending OTP registration -> OTP (survives restart)
+//                     signed in + role set  -> Home (role tabs)
+//                     signed in, role unset -> RoleSelect (onboarding)
+//                     not signed in         -> Login
+//                     onboarding seen       -> Welcome (first-run only)
+//                     pending OTP registration -> OTP (survives restart)
 //
 // Navigation: React Navigation (native-stack). NOT expo-router.
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -48,16 +49,24 @@ const navTheme = {
 };
 
 function RootNavigator() {
-  const { booting, token, user, onboardingComplete, pendingReg, signOut } = useApp();
+  const { booting, token, user, onboardingComplete, pendingReg, signOut, updateUser } = useApp();
+  const bootValidatedRef = useRef(false);
 
-  // Validate a cached session against the server on cold start.
-  // Network failures keep the cached session (offline tolerance).
+  // Validate a cached session against the server on cold start (once per
+  // session — /me returns a refreshed 30d token + current user shape, and
+  // re-arming on every token change would loop). Network failures keep the
+  // cached session (offline tolerance).
   useEffect(() => {
-    if (!token) return;
+    if (!token || bootValidatedRef.current) return;
+    bootValidatedRef.current = true;
     let cancelled = false;
     (async () => {
       try {
-        await api.me(token);
+        const res = await api.me(token);
+        if (!cancelled && res && res.user) {
+          // Store the refreshed token + user (role, verification, status).
+          await updateUser(res.user, res.token);
+        }
       } catch (e) {
         if (!cancelled && e && (e.status === 401 || e.status === 403)) {
           signOut();
@@ -67,13 +76,13 @@ function RootNavigator() {
     return () => {
       cancelled = true;
     };
-  }, [token, signOut]);
+  }, [token, signOut, updateUser]);
 
   if (booting) return <SplashScreen />;
 
   let initialRoute = 'Welcome';
   if (pendingReg) initialRoute = 'Otp';
-  else if (token && user) initialRoute = tabsRouteFor(user);
+  else if (token && user) initialRoute = user.role ? tabsRouteFor(user) : 'RoleSelect';
   else if (onboardingComplete) initialRoute = 'Login';
 
   return (
