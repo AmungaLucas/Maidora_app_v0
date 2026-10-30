@@ -45,6 +45,28 @@ friendly reasons). Two follow-ups from the same session.
   owner's open rows; rc=4999 "Duplicated MSISDN / existing USSD session"
   fires when a second push races to a phone that still has one open — wait
   for the open prompt to clear before sending another.
+- **Live-trace round 2 (payments #25–#28)**: owner tested on two phones — 2
+  successes (receipts `UJUO5015LB`, `UJU6N07RQQ`) and 2 × rc=1037 "DS timeout
+  user cannot be reached", both settled by the Safaricom callback at ~20–25 s
+  (correct: callback is the source of truth; the query path never ran during
+  grace). The scary **9.4 s stk-push call was NETWORK, not gateway** — server
+  route work measured 5 ms; the same window had trivial GETs at 4.4 s. To
+  make that provable forever: global `req.t0` middleware (app.js) + the push
+  request log now ends with `t+Xms after request start` (body parse + JWT
+  auth + user lookup; live: t+9 ms).
+- **OAuth in-flight dedupe (gateway)**: two concurrent background pushes
+  raced `getAccessToken` and fetched TWO tokens (live, rows #23/#24); the
+  fetch is now a single shared promise (`requestToken` + `tokenFetchPromise`),
+  cleared on completion so failures retry fresh.
+- **Poll overlap guard (app)**: on the slow network a poll tick outlived the
+  4 s interval (4.4 s GET) and the next overlapping tick double-logged
+  "ended as failed" (#27); ticks now skip while one is in flight
+  ("poll tick skipped — previous check still running") and `doneRef` swallows
+  stray queued ticks so the end log fires exactly once.
+- **Verification**: gateway E2E 10/10 (`scripts/deploy_mpesa_harden2.py`) —
+  exactly ONE OAuth fetch for one push, t+attribution line, label, push
+  accepted, callback ACK; backend `node --check` ×3 + app parse-check + full
+  expo export green.
 - Spec adoption map unchanged — M-Pesa test payments are not a spec
   section; the §9 product slots it pre-maps are still ⏳ pending.
 

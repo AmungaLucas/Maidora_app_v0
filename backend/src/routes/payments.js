@@ -132,7 +132,10 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       return res.status(400).json({ message: 'Enter a valid Kenyan number, e.g. 0712 345 678.' });
     }
     const purpose = String((req.body && req.body.purpose) || 'general').slice(0, 64);
-    console.error(`[MPESA] push request → user=${req.user.uid} amount=${amount} phone=${phone} purpose=${purpose}`);
+    console.error(
+      `[MPESA] push request → user=${req.user.uid} amount=${amount} phone=${phone} purpose=${purpose}` +
+        ` (t+${Date.now() - (req.t0 || t0)}ms after request start — body parse + JWT auth + user lookup)`
+    );
 
     // Persist the intent FIRST so we always have a row for reconciliation,
     // then hand the app its paymentId without waiting for Daraja.

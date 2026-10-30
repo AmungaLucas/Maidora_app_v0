@@ -65,6 +65,8 @@ export default function PaymentScreen({ navigation }) {
   const [elapsed, setElapsed] = useState(0);
   const [stopped, setStopped] = useState(false); // stopped auto-checking while still pending
   const pollRef = useRef({ timerId: null, n: 0 });
+  const busyRef = useRef(false); // a poll tick is in flight — skip overlapping ticks
+  const doneRef = useRef(false); // flow ended — swallow any stray queued tick
   const elapsedRef = useRef(null);
 
   // Entrance animation for the status card: the full-screen "Sending push"
@@ -86,6 +88,7 @@ export default function PaymentScreen({ navigation }) {
   };
 
   const stopTimers = () => {
+    doneRef.current = true; // reject any already-queued tick
     if (pollRef.current.timerId) clearInterval(pollRef.current.timerId);
     pollRef.current = { timerId: null, n: 0 };
     if (elapsedRef.current) clearInterval(elapsedRef.current);
@@ -97,10 +100,12 @@ export default function PaymentScreen({ navigation }) {
 
   const startPolling = (paymentId) => {
     stopTimers();
+    doneRef.current = false; // fresh run — stopTimers marked it done
+    busyRef.current = false;
     setElapsed(0);
     elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
     log(`polling started for payment #${paymentId} every ${POLL_MS / 1000}s (max ${MAX_POLLS})`);
-    const tick = async () => {
+    const runTick = async () => {
       pollRef.current.n += 1;
       const n = pollRef.current.n;
       let keepGoing = true;
@@ -147,6 +152,21 @@ export default function PaymentScreen({ navigation }) {
         log(`polling stopped after ${n} ticks — payment #${paymentId} still pending (prompt may still be open)`);
         stopTimers();
         setStopped(true);
+      }
+    };
+    // Overlap guard: on a slow network one tick can outlive the 4s interval;
+    // two overlapping checks double-logged "ended as failed" (live 2026-10-30).
+    const tick = async () => {
+      if (doneRef.current) return; // flow already ended — stray queued tick
+      if (busyRef.current) {
+        log('poll tick skipped — previous check still running (slow network)');
+        return;
+      }
+      busyRef.current = true;
+      try {
+        await runTick();
+      } finally {
+        busyRef.current = false;
       }
     };
     pollRef.current.timerId = setInterval(tick, POLL_MS);

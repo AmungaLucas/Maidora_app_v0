@@ -19,9 +19,49 @@ const QUERY_TIMEOUT_MS = 15000;
 
 // OAuth token cache — Daraja tokens last ~1 hour; refresh 60s early.
 let cachedToken = null; // { token, expiresAtMs }
+let tokenFetchPromise = null; // in-flight refresh — two concurrent background
+// pushes used to race here and fetch TWO tokens (seen live 2026-10-30); the
+// shared promise makes every concurrent caller await the same fetch.
 
 const nowMs = () => Date.now();
 const elapsed = (t0) => `${Date.now() - t0}ms`;
+
+function requestToken() {
+  const t0 = nowMs();
+  console.error('[MPESA] OAuth token missing/expired — requesting a new one…');
+  const basic = Buffer.from(`${m.consumerKey}:${m.consumerSecret}`).toString('base64');
+  return (async () => {
+    const res = await darajaFetch(
+      `${m.baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
+      { headers: { Authorization: `Basic ${basic}` } },
+      OAUTH_TIMEOUT_MS,
+      'OAuth'
+    );
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.access_token) {
+      console.error(`[MPESA] OAuth rejected after ${elapsed(t0)}: ${(data && (data.errorMessage || data.error)) || `HTTP ${res.status}`}`);
+      throw mpesaError(
+        (data && (data.errorMessage || data.error)) ||
+          'M-Pesa authentication failed. Check consumer key/secret.',
+        data
+      );
+    }
+    const ttlS = Number(data.expires_in || 3599);
+    cachedToken = { token: data.access_token, expiresAtMs: Date.now() + Math.max(60, ttlS - 60) * 1000 };
+    console.error(`[MPESA] OAuth OK in ${elapsed(t0)} — token cached for ~${Math.round((cachedToken.expiresAtMs - Date.now()) / 1000)}s`);
+    return cachedToken.token;
+  })();
+}
+
+async function getAccessToken() {
+  if (cachedToken && Date.now() < cachedToken.expiresAtMs) return cachedToken.token;
+  if (!tokenFetchPromise) {
+    tokenFetchPromise = requestToken().finally(() => {
+      tokenFetchPromise = null; // failed or finished — next caller retries fresh
+    });
+  }
+  return tokenFetchPromise;
+}
 
 function isConfigured() {
   return Boolean(

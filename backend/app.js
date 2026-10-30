@@ -17,6 +17,16 @@ const kycRoutes = require('./src/routes/kyc');
 
 const app = express();
 
+// Earliest possible request timestamp — routes log (Date.now() - req.t0) to
+// attribute latency between body parse + middleware (JWT auth, DB lookups)
+// and their own work. This is how we tell "slow mobile network" from "slow
+// gateway" in the [MPESA] trace (the 9.4s push call on 2026-10-30 was
+// network: the gateway answered in 5ms of route time).
+app.use((req, res, next) => {
+  req.t0 = Date.now();
+  next();
+});
+
 // KYC image uploads arrive as base64 JSON (up to ~7 MB encoded) — mount the
 // KYC router with its own larger body parser BEFORE the global 256kb one.
 // body-parser skips requests it has already parsed, so nothing double-runs.
