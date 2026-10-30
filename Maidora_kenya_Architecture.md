@@ -2,7 +2,7 @@
 
 > **Living document.** Every working session must keep this file and
 > `WORKLOG.md` in sync with reality (in the same commit). Section 11 defines
-> the rule. Last updated: **2026-10-29**.
+> the rule. Last updated: **2026-10-30**.
 
 Maidora Kenya ("Trusted help for your household") is a two-sided marketplace
 connecting households (employers) with house helps across Kenya. This repo
@@ -26,11 +26,11 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Location auto-update at login (§6) | ✅ LIVE | GPS fix best-effort from app; last known stands on failure |
 | Disposable email block (§12) | ✅ LIVE | signup + email-verification re-check |
 | Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); Profile email sheet live: `POST /auth/update-email` + code entry (2026-10-29) |
-| Profile completeness §7 — BOTH roles (schema v4) | ✅ LIVE | maid: `maid_profiles` 6 checks (bio added); employer: `employer_profiles` (size/children/budget); role-aware `GET/PUT /api/profile` — **partial per-step saves both roles**; MULTISTEP wizard (`CompletenessWizard`, opens at first incomplete step); HomeScreen banner FIRST then KYC (both roles) and updates instantly via shared AppContext snapshot; 3-step DOB picker |
+| Profile completeness §7 — BOTH roles (schema v4) | ✅ LIVE | maid: `maid_profiles` 6 checks (bio added); employer: `employer_profiles` (size/children/budget); role-aware `GET/PUT /api/profile` — **partial per-step saves both roles**; MULTISTEP wizard rebuilt as a FULL-SCREEN modal (progress header with % + tappable step chips, keyboard-safe, sticky save bar); HomeScreen banner FIRST then KYC (both roles) and updates instantly via shared AppContext snapshot; 3-step DOB picker |
 | M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven |
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
-| App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
+| App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
 | App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures |
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |

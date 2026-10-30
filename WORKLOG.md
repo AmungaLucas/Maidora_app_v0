@@ -6,6 +6,50 @@
 
 ---
 
+## 2026-10-30 — Profile UX overhaul: drawer width bug fix, full-screen §7 wizard, profile layout rebuild
+
+Owner verdict on the previous build: *"I don't like the profile screen and the
+profile completeness setup and layout. The drawer isn't working fine… the
+multistep too isn't fine."* Full review found ONE root-cause bug + two
+layout-design failures. All app-side; **no backend or spec-text change**
+(partial per-step PUT /profile stays as deployed; MPS §34 step lists,
+fields and validation are unchanged).
+
+- **DRAWER ROOT-CAUSE BUG** — `ProfileDrawer.js` computed the panel width as
+  `Math.min(320, 0.82)` → **0.82 px** (the 82% ratio was written where a
+  width was expected). The drawer was sub-pixel wide, so the hamburger and
+  edge-swipe appeared dead. Now `Math.min(320, window.width * 0.82)`
+  recomputed on rotation, safe-area insets for the panel padding, active
+  item label highlighted. This alone restores the whole drawer.
+- **§7 wizard → FULL-SCREEN modal** (`CompletenessWizard` rewritten): was
+  rendered inline inside a card under the identity card — keyboard covered
+  fields (`keyboard={false}`), Save fell below the fold. Now a slide-up
+  modal with its own SafeArea/KeyboardAvoiding/ScrollView: progress header
+  ("Step X of N", % bar via new shared `ProgressBar`, tappable step chips —
+  jump freely, ✅ on completed), big step title/hint, sticky footer
+  (Back + Save & continue / Save & finish), done screen with what's left.
+  Behavior preserved: opens at first incomplete step (step 1 when editing a
+  complete profile — previously jumped to the last step), fetches
+  GET /profile on open, partial PUT per step, `onSaved` → AppContext →
+  instant Home banner, closing mid-way keeps saved steps, identical
+  validation (DOB 16–80 picker, ≤8 languages + Other-specify, job type,
+  years/salary, bio ≥10 chars, next of kin; employer size/children/budget).
+- **Profile screen rebuild** (`ProfileScreen`): hamburger moved LEFT (drawer
+  opens left; was top-right), identity card adds location row, "Account
+  status" card replaces the awkward wrapped verification pills with two
+  rows (Phone status chip; Email row → tap when unverified opens the same
+  §5 email sheet), profile-strength card now shows the real % bar + missing
+  chips + CTA, and when complete gains a "Next: get your Trust Badge" row
+  that navigates to drawer Verification (§7 → §8 tie-in).
+- **Shared UI** — `ui.js` gains `ProgressBar` (gold fill, cream track, %);
+  `theme.js` gains the `goldSoft` token (was an inline fallback).
+- **Verified**: babel parse OK on all touched files; production bundle
+  `EXPO_NO_TELEMETRY=1 CI=1 npx expo export --platform android` exit 0
+  (4.3 MB hbc, drawer + wizard included). Home banner reactivity untouched
+  (shared AppContext + focus refetch).
+
+---
+
 ## 2026-10-29 — Wizard + drawer + file restructure: §7 multistep, real drawer nav, screens organized
 
 Owner follow-up batch after using the v4 profile build: banner freshness,

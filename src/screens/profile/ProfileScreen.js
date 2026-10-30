@@ -1,18 +1,31 @@
 // Profile — the drawer's "Personal details" screen (REAL React Navigation
-// drawer, ProfileDrawer). Shared by both roles:
-//   Househelp → §7 profile-strength summary + 6-step completeness wizard
-//   Employer  → household summary + 3-step completeness wizard
-// Both roles: tapping "Email unverified" opens a sheet with a prefilled,
-// editable email → code → verified (SMTP path §5). Completeness lives in
-// AppContext, so every wizard save updates the Home banner instantly.
-// Verification / Payments / Settings live in the drawer (hamburger top-right).
+// drawer, ProfileDrawer). Shared by both roles. Layout (owner redesign
+// 2026-10-30 — the old build crammed everything into stacked cards with the
+// wizard inline, which felt broken):
+//   1. Header — hamburger LEFT (the drawer opens from the left), "Profile".
+//   2. Identity card — avatar, name, role, phone, location.
+//   3. Profile strength card — REAL progress bar + %, missing chips, CTA.
+//      Tapping opens the multistep wizard FULL-SCREEN (CompletenessWizard
+//      modal). When complete, the card becomes a Trust Badge upsell (§8).
+//   4. Account status — tappable Phone / Email rows; unverified email opens
+//      a sheet with a prefilled, editable email → code → verified (§5).
+// Completeness lives in AppContext, so every wizard save updates the Home
+// banner instantly. Verification / Payments / Settings live in the drawer.
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { ROLES, colors, radius } from '../../theme';
-import { Banner, BottomSheetModal, PrimaryButton, Screen, ScreenHeader, TextField } from '../../ui';
+import {
+  Banner,
+  BottomSheetModal,
+  PrimaryButton,
+  ProgressBar,
+  Screen,
+  TextField,
+} from '../../ui';
+import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 import CompletenessWizard from './CompletenessWizard';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -23,12 +36,12 @@ export default function ProfileScreen({ navigation }) {
   const isEmployer = user?.role === 'employer';
 
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardProfile, setWizardProfile] = useState(null);
-  const [wizardLoading, setWizardLoading] = useState(false);
   const [emailSheetOpen, setEmailSheetOpen] = useState(false);
   const [savedNote, setSavedNote] = useState('');
 
   const completeness = profileCompleteness;
+  const hasProfileSection = isHousehelp || isEmployer;
+  const complete = Boolean(completeness && completeness.complete);
 
   const initials = String(user?.fullName || 'M')
     .trim()
@@ -50,44 +63,18 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
-  // Open the wizard: fetch the server profile first so the form hydrates
-  // with existing values and opens at the first incomplete step.
-  const openWizard = async () => {
-    setWizardOpen(true);
-    setWizardLoading(true);
-    try {
-      const res = await api.getProfile(token);
-      setWizardProfile(res.profile || null);
-      if (res.completeness) setProfileCompleteness(res.completeness);
-    } catch {
-      // Non-blocking: the wizard still opens with an empty form.
-      setWizardProfile(null);
-    } finally {
-      setWizardLoading(false);
-    }
-  };
-
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
-      <ScreenHeader
-        eyebrow="Account"
-        title="Profile"
-        right={
-          <Pressable
-            onPress={() => navigation.openDrawer()}
-            hitSlop={10}
-            style={styles.menuBtn}
-            accessibilityLabel="Open menu"
-          >
-            <Ionicons name="menu" size={24} color={colors.brand} />
-          </Pressable>
-        }
-      />
+      {/* Header — hamburger LEFT (drawer opens from the left) */}
+      <View style={styles.header}>
+        <DrawerMenuButton navigation={navigation} />
+        <Text style={styles.headerTitle}>Profile</Text>
+      </View>
 
+      {/* 1 — Identity */}
       <View style={styles.identityCard}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initials}</Text>
-          <View style={styles.avatarRing} />
         </View>
         <Text style={styles.name}>{user?.fullName}</Text>
         <View style={styles.roleBadge}>
@@ -98,78 +85,50 @@ export default function ProfileScreen({ navigation }) {
           />
           <Text style={styles.roleBadgeText}>{ROLES[user?.role] || 'Member'}</Text>
         </View>
-        <Text style={styles.contact}>{user?.phone}</Text>
-        {user?.email ? <Text style={styles.contact}>{user.email}</Text> : null}
-        <View style={styles.verificationRow}>
-          <View style={[styles.vChip, user?.phoneVerified && styles.vChipOk]}>
-            <Ionicons
-              name={user?.phoneVerified ? 'checkmark-circle' : 'alert-circle'}
-              size={13}
-              color={user?.phoneVerified ? colors.forest : colors.goldDark}
-            />
-            <Text style={[styles.vChipText, user?.phoneVerified && styles.vChipTextOk]}>
-              {user?.phoneVerified ? 'Phone verified' : 'Phone unverified'}
-            </Text>
-          </View>
-          {/* Tap when unverified → prefilled, editable email + code sheet (§5) */}
-          <Pressable
-            disabled={user?.emailVerified}
-            onPress={() => setEmailSheetOpen(true)}
-            style={[styles.vChip, user?.emailVerified && styles.vChipOk]}
-          >
-            <Ionicons
-              name={user?.emailVerified ? 'checkmark-circle' : 'alert-circle'}
-              size={13}
-              color={user?.emailVerified ? colors.forest : colors.goldDark}
-            />
-            <Text style={[styles.vChipText, user?.emailVerified && styles.vChipTextOk]}>
-              {user?.emailVerified ? 'Email verified' : 'Email unverified · tap to verify'}
-            </Text>
-          </Pressable>
+        <View style={styles.contactRow}>
+          <Ionicons name="call-outline" size={15} color={colors.muted} />
+          <Text style={styles.contactText}>{user?.phone}</Text>
         </View>
+        {user?.locationName ? (
+          <View style={styles.contactRow}>
+            <Ionicons name="location-outline" size={15} color={colors.muted} />
+            <Text style={styles.contactText}>{user.locationName}</Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* §7 completeness summary → multistep wizard */}
-      {isHousehelp || isEmployer ? (
-        <View style={styles.completenessCard}>
-          {wizardOpen ? (
-            wizardLoading ? (
-              <View style={styles.wizardLoading}>
-                <Ionicons name="sparkles-outline" size={26} color={colors.gold} />
-                <Text style={styles.wizardLoadingText}>Loading your details…</Text>
-              </View>
-            ) : (
-              <CompletenessWizard
-                role={isHousehelp ? 'househelp' : 'employer'}
-                profile={wizardProfile}
-                token={token}
-                onSaved={onWizardSaved}
-                onClose={() => setWizardOpen(false)}
-              />
-            )
-          ) : (
+      {/* 2 — §7 Profile strength → multistep wizard (full-screen modal) */}
+      {hasProfileSection ? (
+        <View style={styles.card}>
+          {completeness ? (
             <>
-              <View style={styles.completenessHead}>
-                <Ionicons
-                  name={isHousehelp ? 'ribbon-outline' : 'home-outline'}
-                  size={20}
-                  color={colors.brand}
-                />
-                <Text style={styles.completenessTitle}>
+              <View style={styles.strengthHead}>
+                <View style={styles.strengthIcon}>
+                  <Ionicons
+                    name={isHousehelp ? 'ribbon-outline' : 'home-outline'}
+                    size={17}
+                    color={colors.brand}
+                  />
+                </View>
+                <Text style={styles.strengthTitle}>
                   {isHousehelp ? 'Profile strength' : 'Household profile'}
                 </Text>
-                <Text style={styles.completenessCount}>
-                  {completeness ? `${completeness.done}/${completeness.total}` : '—'}
+                <Text style={styles.strengthCount}>
+                  {completeness.done}/{completeness.total}
                 </Text>
               </View>
-              <Text style={styles.completenessBody}>
-                {completeness && completeness.complete
+              <ProgressBar
+                ratio={completeness.total ? completeness.done / completeness.total : 0}
+                showLabel
+              />
+              <Text style={styles.strengthBody}>
+                {complete
                   ? isHousehelp
                     ? 'Complete. Households see everything they need to trust and hire you.'
                     : 'Complete. Maids can see the household context they need before applying.'
                   : 'Fill this in a few quick steps. It never blocks you from applying or hiring.'}
               </Text>
-              {completeness && !completeness.complete ? (
+              {!complete && completeness.missing?.length ? (
                 <View style={styles.missingWrap}>
                   {completeness.missing.map((m) => (
                     <View key={m} style={styles.missingChip}>
@@ -178,25 +137,94 @@ export default function ProfileScreen({ navigation }) {
                   ))}
                 </View>
               ) : null}
-
               {savedNote ? <Banner kind="info" message={savedNote} /> : null}
-
-              <PrimaryButton
-                title={
-                  completeness && completeness.complete
-                    ? isHousehelp
-                      ? 'Edit my details'
-                      : 'Edit household details'
-                    : isHousehelp
-                      ? 'Complete my profile'
-                      : 'Tell us about your home'
-                }
-                onPress={openWizard}
-              />
             </>
+          ) : (
+            <Text style={[styles.strengthBody, { marginBottom: 12 }]}>
+              {isHousehelp
+                ? 'Add your details so households can find and trust you.'
+                : 'Tell maids about your home so they can apply with confidence.'}
+            </Text>
           )}
+
+          <PrimaryButton
+            title={
+              complete
+                ? isHousehelp
+                  ? 'Edit my details'
+                  : 'Edit household details'
+                : isHousehelp
+                  ? 'Complete my profile'
+                  : 'Tell us about your home'
+            }
+            onPress={() => setWizardOpen(true)}
+          />
+
+          {/* Complete → level up to the Trust Badge (§8), inside the drawer */}
+          {complete && user?.kycStatus !== 'approved' ? (
+            <Pressable style={styles.badgeRow} onPress={() => navigation.navigate('Verification')}>
+              <View style={[styles.badgeIcon, { backgroundColor: colors.goldSoft }]}>
+                <Ionicons name="shield-checkmark-outline" size={18} color={colors.goldDark} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.badgeTitle}>Next: get your Trust Badge</Text>
+                <Text style={styles.badgeBody}>
+                  Verified ID builds trust — free, reviewed within 72 hours.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
+
+      {/* 3 — Account status: tappable verification rows */}
+      <View style={styles.card}>
+        <Text style={styles.statusLabel}>Account status</Text>
+        <View style={[styles.statusRow, styles.statusRowBorder]}>
+          <Ionicons
+            name={user?.phoneVerified ? 'checkmark-circle' : 'alert-circle'}
+            size={20}
+            color={user?.phoneVerified ? colors.forest : colors.goldDark}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statusTitle}>Phone</Text>
+            <Text style={styles.statusBody}>{user?.phone}</Text>
+          </View>
+          <Text
+            style={[
+              styles.statusChip,
+              user?.phoneVerified ? styles.statusChipOk : styles.statusChipPending,
+            ]}
+          >
+            {user?.phoneVerified ? 'Verified' : 'Unverified'}
+          </Text>
+        </View>
+        {/* Tap when unverified → prefilled, editable email + code sheet (§5) */}
+        <Pressable
+          disabled={user?.emailVerified}
+          onPress={() => setEmailSheetOpen(true)}
+          style={styles.statusRow}
+        >
+          <Ionicons
+            name={user?.emailVerified ? 'checkmark-circle' : 'alert-circle'}
+            size={20}
+            color={user?.emailVerified ? colors.forest : colors.goldDark}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statusTitle}>Email</Text>
+            <Text style={styles.statusBody}>{user?.email || 'Add your email'}</Text>
+          </View>
+          {user?.emailVerified ? (
+            <Text style={[styles.statusChip, styles.statusChipOk]}>Verified</Text>
+          ) : (
+            <View style={styles.statusAction}>
+              <Text style={styles.statusActionText}>Verify</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.forest} />
+            </View>
+          )}
+        </Pressable>
+      </View>
 
       <Text style={styles.footerNote}>
         <Text style={{ color: colors.gold }}>♥ </Text>
@@ -211,8 +239,18 @@ export default function ProfileScreen({ navigation }) {
         token={token}
       />
 
+      {/* Full-screen multistep wizard — fetches the server profile itself,
+          opens at the first incomplete step, saves each step partially. */}
+      <CompletenessWizard
+        visible={wizardOpen}
+        role={isHousehelp ? 'househelp' : 'employer'}
+        token={token}
+        onSaved={onWizardSaved}
+        onClose={() => setWizardOpen(false)}
+      />
+
       {/* Verification / Payments / Settings live in the DRAWER — hamburger
-          top-right (ProfileDrawer). Log out is in the drawer footer. */}
+          top-LEFT (ProfileDrawer). Log out is in the drawer footer. */}
     </Screen>
   );
 }
@@ -364,16 +402,15 @@ function EmailVerifySheet({ visible, onClose, user, token }) {
 }
 
 const styles = StyleSheet.create({
-  menuBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.line,
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 12,
+    paddingTop: 14,
+    paddingBottom: 16,
   },
+  headerTitle: { fontSize: 24, fontWeight: '800', color: colors.ink, flex: 1 },
+  // Identity card
   identityCard: {
     alignItems: 'center',
     backgroundColor: colors.card,
@@ -381,16 +418,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     padding: 22,
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  avatar: { width: 84, height: 84, alignItems: 'center', justifyContent: 'center' },
-  avatarRing: {
-    position: 'absolute',
+  avatar: {
     width: 84,
     height: 84,
     borderRadius: 42,
+    backgroundColor: colors.brandSoftBg,
     borderWidth: 2,
     borderColor: colors.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarText: { fontSize: 28, fontWeight: '800', color: colors.brand },
   name: { marginTop: 12, fontSize: 19, fontWeight: '800', color: colors.ink },
@@ -406,43 +444,82 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   roleBadgeText: { color: colors.goldDark, fontSize: 12.5, fontWeight: '700' },
-  contact: { marginTop: 6, fontSize: 14, color: colors.muted },
-  verificationRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 12 },
-  vChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderColor: colors.gold,
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  vChipOk: { borderColor: colors.forest },
-  vChipText: { color: colors.goldDark, fontSize: 11.5, fontWeight: '700' },
-  vChipTextOk: { color: colors.forest },
-  completenessCard: {
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  contactText: { fontSize: 14, color: colors.muted },
+  // Shared card
+  card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.line,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  completenessHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  completenessTitle: { flex: 1, fontSize: 16.5, fontWeight: '800', color: colors.ink },
-  completenessCount: { fontSize: 16, fontWeight: '800', color: colors.goldDark },
-  completenessBody: { marginTop: 8, fontSize: 14, lineHeight: 21, color: colors.muted },
-  missingWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10, marginBottom: 4 },
+  // Profile strength
+  strengthHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  strengthIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: colors.brandSoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  strengthTitle: { flex: 1, fontSize: 16.5, fontWeight: '800', color: colors.ink },
+  strengthCount: { fontSize: 16, fontWeight: '800', color: colors.goldDark },
+  strengthBody: { marginTop: 12, fontSize: 14, lineHeight: 21, color: colors.muted },
+  missingWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12, marginBottom: 4 },
   missingChip: {
-    backgroundColor: colors.goldSoft || '#FBF3E3',
+    backgroundColor: colors.goldSoft,
     borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   missingChipText: { color: colors.goldDark, fontSize: 12, fontWeight: '700' },
-  wizardLoading: { alignItems: 'center', paddingVertical: 22 },
-  wizardLoadingText: { marginTop: 8, fontSize: 14, color: colors.muted, fontWeight: '600' },
+  // Trust badge row
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  badgeIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink },
+  badgeBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
+  // Account status
+  statusLabel: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: colors.muted,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13 },
+  statusRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.line },
+  statusTitle: { fontSize: 15, fontWeight: '700', color: colors.ink },
+  statusBody: { marginTop: 1, fontSize: 13, color: colors.muted },
+  statusChip: {
+    fontSize: 12,
+    fontWeight: '800',
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  statusChipOk: { color: colors.forest, backgroundColor: colors.greenSoft },
+  statusChipPending: { color: colors.goldDark, backgroundColor: colors.goldSoft },
+  statusAction: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  statusActionText: { color: colors.forest, fontWeight: '800', fontSize: 13.5 },
   footerNote: { textAlign: 'center', fontSize: 12.5, color: colors.muted, paddingVertical: 14 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
   sheetTitle: { fontSize: 18, fontWeight: '800', color: colors.ink },

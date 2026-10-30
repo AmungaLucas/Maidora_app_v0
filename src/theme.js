@@ -17,6 +17,7 @@ export const colors = {
   white: '#FFFFFF',
   brandDark: '#183828',
   brandSoftBg: '#E7F2EA',
+  goldSoft: '#FBF3E3', // pale gold — missing-item chips, info surfaces
 
   /* Aliases (legacy names used across earlier screens) */
   forest: '#214E3B', // = brand

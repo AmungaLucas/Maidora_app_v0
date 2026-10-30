@@ -6,10 +6,18 @@
 //   Payments & receipts · Account settings · Log out (footer).
 // Custom drawerContent keeps the branded look (identity header, gold ring
 // avatar, item cards) that the previous in-house modal had.
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+//
+// WIDTH BUG (2026-10-30): the width used to be `Math.min(320, 0.82)` — that
+// evaluates to 0.82 PIXELS, so the panel was sub-pixel wide and the drawer
+// looked dead (hamburger/swipe showed nothing). Width is now computed from
+// the real window width (82%, capped at 320) and recomputed on rotation.
+import React, { useState } from 'react';
+import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { createDrawerNavigator, DrawerContentScrollView } from '@react-navigation/drawer';
+import {
+  createDrawerNavigator,
+} from '@react-navigation/drawer';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ProfileScreen from '../screens/profile/ProfileScreen';
 import KycIntroScreen from '../screens/verification/KycIntroScreen';
@@ -20,8 +28,9 @@ import { ROLES, colors, radius } from '../theme';
 
 const Drawer = createDrawerNavigator();
 
-// Drawer width mirrors the previous in-house panel.
-const DRAWER_W = Math.min(320, 0.82);
+// Drawer width: 82% of the window, capped at 320 — recomputed on rotation
+// so landscape never ends up with a stale or collapsed panel.
+const drawerWidth = () => Math.min(320, Math.round(Dimensions.get('window').width * 0.82));
 
 const ITEMS = [
   { route: 'ProfileMain', icon: 'person-circle-outline', label: 'Personal details' },
@@ -32,6 +41,7 @@ const ITEMS = [
 
 function BrandDrawerContent({ navigation, state }) {
   const { user, signOut } = useApp();
+  const insets = useSafeAreaInsets();
 
   const initials = String(user?.fullName || 'M')
     .trim()
@@ -53,7 +63,12 @@ function BrandDrawerContent({ navigation, state }) {
   };
 
   return (
-    <View style={styles.panel}>
+    <View
+      style={[
+        styles.panel,
+        { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 20) },
+      ]}
+    >
       {/* Identity header */}
       <View style={styles.head}>
         <View style={styles.avatar}>
@@ -84,7 +99,7 @@ function BrandDrawerContent({ navigation, state }) {
               <View style={[styles.itemIcon, active && styles.itemIconActive]}>
                 <Ionicons name={item.icon} size={19} color={active ? colors.brand : colors.muted} />
               </View>
-              <Text style={styles.itemLabel} numberOfLines={1}>
+              <Text style={[styles.itemLabel, active && styles.itemLabelActive]} numberOfLines={1}>
                 {item.label}
               </Text>
               <Ionicons name="chevron-forward" size={16} color={colors.muted} />
@@ -110,6 +125,13 @@ function BrandDrawerContent({ navigation, state }) {
 }
 
 export default function ProfileDrawer() {
+  // Keep the panel width honest across rotations / split-screen.
+  const [width, setWidth] = useState(drawerWidth());
+  React.useEffect(() => {
+    const sub = Dimensions.addEventListener('change', () => setWidth(drawerWidth()));
+    return () => sub?.remove?.();
+  }, []);
+
   return (
     <Drawer.Navigator
       screenOptions={{
@@ -117,8 +139,8 @@ export default function ProfileDrawer() {
         drawerType: 'front',
         drawerPosition: 'left',
         swipeEnabled: true,
-        edgeWidth: 60,
-        drawerStyle: { width: DRAWER_W, backgroundColor: colors.card },
+        swipeEdgeWidth: 60,
+        drawerStyle: { width: width, backgroundColor: colors.card },
         overlayColor: 'rgba(22, 38, 29, 0.45)',
       }}
       drawerContent={(props) => <BrandDrawerContent {...props} />}
@@ -136,8 +158,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.card,
     paddingHorizontal: 18,
-    paddingTop: 60,
-    paddingBottom: 24,
   },
   head: {
     flexDirection: 'row',

@@ -196,6 +196,20 @@ export function Banner({ kind = 'error', message }) {
   );
 }
 
+// ProgressBar — §7 profile-strength bar (Profile card + wizard header).
+// `ratio` 0..1; gold fill on a cream track with the % rendered right.
+export function ProgressBar({ ratio, height = 8, showLabel = false }) {
+  const pct = Math.max(0, Math.min(1, Number(ratio) || 0));
+  return (
+    <View style={styles.progressRow}>
+      <View style={[styles.progressTrack, { height }]}>
+        <View style={[styles.progressFill, { width: `${Math.round(pct * 100)}%` }]} />
+      </View>
+      {showLabel ? <Text style={styles.progressLabel}>{Math.round(pct * 100)}%</Text> : null}
+    </View>
+  );
+}
+
 export function RoleChip({ label, onChange }) {
   return (
     <View style={styles.roleChip}>
@@ -321,6 +335,17 @@ const styles = StyleSheet.create({
   bannerError: { backgroundColor: colors.dangerSoft },
   bannerInfo: { backgroundColor: colors.greenSoft },
   bannerText: { flex: 1, fontSize: 14, fontWeight: '500' },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  progressTrack: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: colors.cream,
+    borderWidth: 1,
+    borderColor: colors.line,
+    overflow: 'hidden',
+  },
+  progressFill: { height: '100%', borderRadius: 999, backgroundColor: colors.gold },
+  progressLabel: { fontSize: 13, fontWeight: '800', color: colors.goldDark, minWidth: 38, textAlign: 'right' },
   roleChip: {
     flexDirection: 'row',
     alignItems: 'center',
