@@ -6,6 +6,50 @@
 
 ---
 
+## 2026-10-30 — M-Pesa polish: smooth loader crossfade + per-purpose STK labels
+
+Owner logs confirmed the respond-first fix end to end (payment #16 success,
+receipt `UJUO50145U`; #17–#20 user-side cancellations surfaced cleanly with
+friendly reasons). Two follow-ups from the same session.
+
+- **Smooth transitions (app)**: `FullScreenLoader` now fades OUT *before* its
+  Modal unmounts — RN `Modal visible={false}` kills the Android window
+  instantly, so the old 220 ms exit fade never played (the hard cut between
+  "Sending push" and "Check your phone"). Mount-gated: veil animates to 0
+  while still mounted, unmounts 20 ms later, `pointerEvents` disabled during
+  exit. `PaymentScreen` status card gained an entrance animation (opacity
+  0→1 + 18 px rise, 340 ms, RN `Animated` / native driver) that replays on
+  every status flip (pending → success/failed) — loader fade-out and card
+  fade-in now overlap into a real crossfade.
+- **Per-purpose STK labels (gateway)**: `routes/payments.js` gains a
+  `PURPOSE_STK` map — purpose → AccountReference (≤12 alnum) +
+  TransactionDesc (≤13): `app_test`→TEST/"Test payment",
+  `general`→MAIDORA, `kyc_urgent`→KYCURGENT/"Urgent KYC", plus pre-mapped
+  §9 slots (application / maid_basic / maid_gold / profile_boost /
+  application_boost); unknown purposes sanitize to a safe fallback.
+  `services/mpesa.js` `stkPush` accepts `transactionDesc` and logs the
+  exact payload (`[MPESA] STK push payload — accountReference=… desc=…`).
+  Note: the server `.env` has no `MPESA_TRANSACTION_DESC`, so the old
+  fallback sliced "Maidora payment" → "Maidora payme" — unreachable for
+  mapped purposes now.
+- **Prompt display reality (documented, not changed)**: the shortcode runs
+  `CustomerBuyGoodsOnline` (till), so Safaricom shows only "…pay KSh X to
+  BILLUC SOLUTIONS" on the prompt; the AccountReference lands on the
+  confirmation SMS + M-Pesa statement. A PayBill-type shortcode would show
+  "… for account <ref>" on the prompt itself — flipping
+  `MPESA_PROD_TRANSACTION_TYPE` is a one-env experiment if the owner wants it.
+- **Verification**: gateway E2E 11/11 (`scripts/deploy_mpesa_stk_label.py`) —
+  both labels asserted in `stderr.log`, pushes ACCEPTED, rows list with
+  purposes, callback ACK; app parse-check + full expo export green (4.3 MB
+  hbc). Bonus live finds: rc=1038 "No response from user" settled one of the
+  owner's open rows; rc=4999 "Duplicated MSISDN / existing USSD session"
+  fires when a second push races to a phone that still has one open — wait
+  for the open prompt to clear before sending another.
+- Spec adoption map unchanged — M-Pesa test payments are not a spec
+  section; the §9 product slots it pre-maps are still ⏳ pending.
+
+---
+
 ## 2026-10-30 — M-Pesa respond-first + end-to-end [MPESA] tracing (cancelled-fetch bug killed)
 
 Owner symptom: *"fetch failed: fetch has been cancelled … after the failure

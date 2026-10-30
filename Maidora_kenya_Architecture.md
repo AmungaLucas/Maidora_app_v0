@@ -27,11 +27,11 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Disposable email block (§12) | ✅ LIVE | signup + email-verification re-check |
 | Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); Profile email sheet live: `POST /auth/update-email` + code entry (2026-10-29) |
 | Profile completeness §7 — BOTH roles (schema v4) | ✅ LIVE | maid: `maid_profiles` 6 checks (bio added); employer: `employer_profiles` (size/children/budget); role-aware `GET/PUT /api/profile` — **partial per-step saves both roles**; MULTISTEP wizard rebuilt as a FULL-SCREEN modal (progress header with % + tappable step chips, keyboard-safe, sticky save bar); HomeScreen banner FIRST then KYC (both roles) and updates instantly via shared AppContext snapshot; 3-step DOB picker |
-| M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven; **respond-first since 2026-10-30** — stk-push answers in <1 s (row → paymentId → background Daraja push), killing the "fetch has been cancelled / prompt arrives anyway" race; every stage traced with `[MPESA]` lines in `stderr.log`; app polls + adopts pending rows on client timeout |
+| M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven; **respond-first since 2026-10-30** — stk-push answers in <1 s (row → paymentId → background Daraja push), killing the "fetch has been cancelled / prompt arrives anyway" race; every stage traced with `[MPESA]` lines in `stderr.log`; app polls + adopts pending rows on client timeout. **Per-purpose STK labels 2026-10-30** — `PURPOSE_STK` map (§6.1) sends AccountReference/TransactionDesc per purpose (`app_test`→TEST/"Test payment", `kyc_urgent`→KYCURGENT/"Urgent KYC", §9 product slots pre-mapped); BuyGoods (till) prompts show only the business name — the reference lands on the confirmation SMS + statement |
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
 | App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
-| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures |
+| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **smooth state transitions 2026-10-30** — FullScreenLoader now fades OUT before its Modal unmounts (RN Modal kills the window instantly, so the old exit fade never played) and the status card crossfades in (opacity + 18 px rise; replays on pending→success/failed) |
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
@@ -242,7 +242,7 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 `MPESA_BASE_URL` (prod `https://api.safaricom.co.ke`) ·
 `MPESA_PROD_CONSUMER_KEY` / `_CONSUMER_SECRET` / `_BUSINESS_SHORTCODE` /
 `_TRANSACTION_TYPE` / `_PARTY_B` / `_PASSKEY` · `MPESA_CALLBACK_URL` ·
-`MPESA_ACCOUNT_REFERENCE` (Maidora, ≤12) · `MPESA_TRANSACTION_DESC` (≤13) ·
+`MPESA_ACCOUNT_REFERENCE` (Maidora, ≤12 — fallback only; the per-purpose `PURPOSE_STK` map in `routes/payments.js` overrides) · `MPESA_TRANSACTION_DESC` (≤13, fallback only) ·
 `NODE_ENV=production`.
 
 ### 5.4 Database
@@ -285,9 +285,11 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 
 App `POST /payments/stk-push` → validate amount/phone → **persist `pending`
 row first** → `mpesa.stkPush` (OAuth cached, password =
-base64(shortcode+passkey+**Kenya-time** timestamp)) → persist
-`checkout_request_id` → app starts polling. Daraja refuses → row marked
-`failed` with the reason.
+base64(shortcode+passkey+**Kenya-time** timestamp), **AccountReference +
+TransactionDesc from the `PURPOSE_STK` map — purpose → ≤12-char alnum ref /
+≤13-char desc, e.g. `app_test`→TEST/"Test payment", `kyc_urgent`→KYCURGENT/
+"Urgent KYC"**) → persist `checkout_request_id` → app starts polling. Daraja
+refuses → row marked `failed` with the reason.
 
 ### 6.2 Settlement policy — **the callback is the single source of truth**
 

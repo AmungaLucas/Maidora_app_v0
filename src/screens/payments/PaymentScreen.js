@@ -20,7 +20,7 @@
 // Every step of the journey logs a [MPESA] line (start → push → poll ticks →
 // settlement → receipt) so the whole flow can be traced from the console.
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BrandLoader from '../../components/brand/BrandLoader';
 import FullScreenLoader from '../../components/brand/FullScreenLoader';
@@ -66,6 +66,24 @@ export default function PaymentScreen({ navigation }) {
   const [stopped, setStopped] = useState(false); // stopped auto-checking while still pending
   const pollRef = useRef({ timerId: null, n: 0 });
   const elapsedRef = useRef(null);
+
+  // Entrance animation for the status card: the full-screen "Sending push"
+  // loader fades out while this card fades in and rises — a real crossfade
+  // instead of a hard cut. Replays when the status flips (pending →
+  // success / failed) so every state change lands smoothly.
+  const cardAnim = useRef(new Animated.Value(0)).current;
+  const statusKey = payment ? payment.status : '';
+  useEffect(() => {
+    if (!statusKey || starting) return;
+    cardAnim.setValue(0);
+    Animated.timing(cardAnim, { toValue: 1, duration: 340, useNativeDriver: true }).start();
+  }, [statusKey, starting, cardAnim]);
+  const cardStyle = {
+    opacity: cardAnim,
+    transform: [
+      { translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) },
+    ],
+  };
 
   const stopTimers = () => {
     if (pollRef.current.timerId) clearInterval(pollRef.current.timerId);
@@ -226,7 +244,7 @@ export default function PaymentScreen({ navigation }) {
       <Banner message={error} />
 
       {payment && payment.status === 'success' ? (
-        <View style={[styles.statusCard, { borderColor: colors.brandSoft }]}>
+        <Animated.View style={[styles.statusCard, { borderColor: colors.brandSoft }, cardStyle]}>
           <Ionicons name="checkmark-circle" size={46} color={colors.brandSoft} />
           <Text style={styles.statusTitle}>Payment received</Text>
           <Text style={styles.statusBody}>
@@ -241,9 +259,9 @@ export default function PaymentScreen({ navigation }) {
             onPress={() => (inDrawer ? navigation.navigate('HomeTab') : navigation.goBack())}
             style={{ marginTop: 18 }}
           />
-        </View>
+        </Animated.View>
       ) : payment && payment.status === 'failed' ? (
-        <View style={[styles.statusCard, { borderColor: colors.danger }]}>
+        <Animated.View style={[styles.statusCard, { borderColor: colors.danger }, cardStyle]}>
           <Ionicons name="close-circle" size={46} color={colors.danger} />
           <Text style={styles.statusTitle}>Payment not completed</Text>
           <Text style={styles.statusBody}>{friendlyFailure(payment)}</Text>
@@ -251,9 +269,9 @@ export default function PaymentScreen({ navigation }) {
             Nothing is charged for unapproved requests. Send a new push whenever you are ready.
           </Text>
           <PrimaryButton title="Try Again" onPress={reset} style={{ marginTop: 18 }} />
-        </View>
+        </Animated.View>
       ) : payment && pending ? (
-        <View style={[styles.statusCard, { borderColor: colors.gold }]}>
+        <Animated.View style={[styles.statusCard, { borderColor: colors.gold }, cardStyle]}>
           <BrandLoader variant="radar" size={92} color={colors.brandSoft} />
           <Text style={styles.statusTitle}>Check your phone</Text>
           <Text style={styles.statusBody}>
@@ -284,7 +302,7 @@ export default function PaymentScreen({ navigation }) {
               <SecondaryButton title="Back to Home" onPress={reset} style={{ marginTop: 10, alignSelf: 'stretch' }} />
             </>
           ) : null}
-        </View>
+        </Animated.View>
       ) : (
         <>
           <Text style={styles.label}>Amount (KES)</Text>

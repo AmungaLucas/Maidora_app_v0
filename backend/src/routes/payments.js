@@ -43,6 +43,27 @@ const SETTLE_MS = 150000;
 // source of truth for the remaining failure modes.
 const DEFINITIVE_FAILURE_CODES = new Set(['1', '1032', '1037']);
 
+// What the customer sees from Safaricom, per payment purpose (§9 prices).
+// Daraja limits: AccountReference ≤ 12 chars (alphanumeric), TransactionDesc
+// ≤ 13 chars. Display reality: with CustomerBuyGoodsOnline (till) the prompt
+// shows only the business name — the reference lands on the confirmation SMS
+// and the M-Pesa statement; a PayBill-type shortcode additionally shows it
+// on the prompt as "… for account <ref>".
+const PURPOSE_STK = {
+  app_test:          { ref: 'TEST',         desc: 'Test payment' },
+  general:           { ref: 'MAIDORA',      desc: 'Maidora' },
+  application:       { ref: 'APPLICATION',  desc: 'Application' },
+  maid_basic:        { ref: 'MAIDBASIC',    desc: 'Maid Basic' },
+  maid_gold:         { ref: 'MAIDGOLD',     desc: 'Maid Gold' },
+  profile_boost:     { ref: 'PROFILEBOOST', desc: 'Profile boost' },
+  application_boost: { ref: 'APPBOOST',     desc: 'App boost' },
+  kyc_urgent:        { ref: 'KYCURGENT',    desc: 'Urgent KYC' },
+};
+const stkRef = (s) =>
+  String(s).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12) || 'MAIDORA';
+const stkDesc = (s) =>
+  String(s).replace(/[^A-Za-z0-9 .-]/g, '').trim().slice(0, 13) || 'Maidora';
+
 function paymentView(p) {
   return {
     id: p.id,
@@ -128,10 +149,13 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       const dT0 = Date.now();
       console.error(`[MPESA] row #${paymentId} dispatching Daraja STK push…`);
       try {
+        // Per-purpose label so the customer can tell WHY they are paying.
+        const label = PURPOSE_STK[purpose] || { ref: purpose, desc: 'Maidora' };
         const push = await mpesa.stkPush({
           amount,
           phone,
-          accountReference: undefined, // falls back to configured reference
+          accountReference: stkRef(label.ref),
+          transactionDesc: stkDesc(label.desc),
         });
         await pool.query(
           'UPDATE payments SET merchant_request_id = ?, checkout_request_id = ? WHERE id = ?',

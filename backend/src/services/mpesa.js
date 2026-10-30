@@ -114,12 +114,18 @@ async function getAccessToken() {
 
 /**
  * Trigger an STK Push prompt on the customer's phone.
- * @param {{amount:number, phone:string, accountReference?:string}} p
+ * @param {{amount:number, phone:string, accountReference?:string,
+ *           transactionDesc?:string}} p
  *   `phone` is E.164 (+2547XXXXXXXX) — the leading + is stripped for Daraja.
+ *   `accountReference` (≤12 chars, alphanumeric) and `transactionDesc`
+ *   (≤13 chars) override the configured defaults per payment purpose —
+ *   the payments route derives them from the purpose map. The reference is
+ *   what Safaricom shows as the payment reason (PayBill prompts show it as
+ *   "for account …"; BuyGoods prompts keep it for the SMS + statement).
  * Resolves with { MerchantRequestID, CheckoutRequestID, CustomerMessage, ... }.
  * Throws Error with .status=502 and .provider on rejection.
  */
-async function stkPush({ amount, phone, accountReference }) {
+async function stkPush({ amount, phone, accountReference, transactionDesc }) {
   if (!isConfigured()) {
     const err = new Error('M-Pesa is not fully configured on the server.');
     err.status = 503;
@@ -128,6 +134,11 @@ async function stkPush({ amount, phone, accountReference }) {
   const msisdn = String(phone).replace(/^\+/, '');
   const ts = timestamp();
   const t0 = nowMs();
+  const acctRef = accountReference || m.accountReference;
+  const txDesc = transactionDesc || m.description;
+  console.error(
+    `[MPESA] STK push payload — accountReference="${acctRef}" desc="${txDesc}" phone=${msisdn} amount=${Math.round(Number(amount))}`
+  );
   let res;
   let data;
   try {
@@ -149,8 +160,8 @@ async function stkPush({ amount, phone, accountReference }) {
           PartyB: m.partyB,
           PhoneNumber: msisdn,
           CallBackURL: m.callbackUrl,
-          AccountReference: accountReference || m.accountReference,
-          TransactionDesc: m.description,
+          AccountReference: acctRef,
+          TransactionDesc: txDesc,
         }),
       },
       PUSH_TIMEOUT_MS,
