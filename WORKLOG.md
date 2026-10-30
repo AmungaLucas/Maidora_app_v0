@@ -6,6 +6,58 @@
 
 ---
 
+## 2026-10-30 — M-Pesa respond-first + end-to-end [MPESA] tracing (cancelled-fetch bug killed)
+
+Owner symptom: *"fetch failed: fetch has been cancelled … after the failure
+message I get the prompt on my phone and when I enter PIN it's successful."*
+Diagnosis: stk-push used to wait synchronously for Daraja (cold OAuth alone
+measured at **3.1 s**, push **1.6 s** — under load well past the app's 30 s
+fetch timeout). The client aborted → app showed a hard failure — yet Daraja
+accepted anyway → prompt arrived late → PIN → success. **Deployed to the
+gateway (11/11 live E2E, `scripts/deploy_mpesa_respond_first.py`); expo
+export bundle green.**
+
+- **Gateway: RESPOND-FIRST stk-push** (`src/routes/payments.js`): the
+  payments row is created BEFORE Daraja is called; the route answers the app
+  immediately (measured **68 ms** E2E) with `{ paymentId, queued: true }`;
+  the Daraja push runs in the background and fills `checkout_request_id` on
+  the row (or flips it to failed with the reason, which polling surfaces).
+  Response shape stays backward compatible. A slow/failed Daraja can no
+  longer produce a "cancelled" app error with a prompt still in flight.
+- **Gateway: hard timeouts + full tracing** (`src/services/mpesa.js`): every
+  Daraja fetch now has `AbortSignal.timeout` (OAuth 15 s, push 25 s, query
+  15 s) and undici's bare "fetch failed" becomes a readable message. ALL
+  stages log `[MPESA]` lines: push request → row created → app response →
+  OAuth (cache hit/miss, ms) → STK push (ACCEPTED/REJECTED, ms, IDs) → STK
+  query (rc, decision, age) → callback (SETTLED status, rc, receipt).
+- **Gateway logging reality (new trap, see architecture §9)**: on this
+  cPanel Passenger setup **console.log (stdout) is lost** — only stderr
+  persists in `~/maidora_app/stderr.log`. All payment tracing therefore
+  uses `console.error` (also converted the callback settlement line, which
+  was previously invisible).
+- **App (`src/api.js`)**: cancelled-fetch errors map correctly at last — the
+  device's abort surfaces in several shapes (AbortError, "fetch has been
+  cancelled", "aborted"); ALL now throw the friendly TIMEOUT ApiError, and
+  every `/payments` request logs `[MPESA] method path → status in ms` (plus
+  the raw name/msg/status on failure so nothing slips through again).
+- **App (`PaymentScreen.js`)**: full journey logging (`[MPESA] start → push
+  accepted → poll #n with live status → settled/receipt → stopped/reset`),
+  and a new **adopt-on-timeout** safety net: if the push call still times
+  out (offline/old gateway), the screen probes `GET /payments` for a recent
+  pending row (same amount + last-9 phone, <3 min old) and continues
+  polling it instead of dead-ending — the row always exists server-side.
+- **Live E2E (gateway, 11/11)**: register+OTP → stk-push 200 in 0.69 s with
+  `queued: true` → row pending in list → background push ACCEPTED in 4.77 s
+  (CheckoutRequestID stored) → refresh=1 returns grace-window info →
+  public callback ACKs. Trace visible in stderr.log. E2E rows #14/#15 left
+  in place as the reconciliation trail.
+- Verification gate unchanged (`requireVerified`); settlement policy
+  unchanged (callback is the source of truth; query only accelerates).
+  `MPESA E2E` accounts (phone +254710HHMMSS) accumulate in `users` —
+  periodic cleanup optional.
+
+---
+
 ## 2026-10-30 — Profile UX overhaul: drawer width bug fix, full-screen §7 wizard, profile layout rebuild
 
 Owner verdict on the previous build: *"I don't like the profile screen and the

@@ -3,12 +3,25 @@
 //   OAuth      GET  /oauth/v1/generate?grant_type=client_credentials
 //   STK Push   POST /mpesa/stkpush/v1/processrequest
 //   STK Query  POST /mpesa/stkpushquery/v1/query
+//
+// Every call is timed and logged with the [MPESA] tag so the WHOLE payment
+// journey (request → OAuth → push → query → callback) can be traced in the
+// gateway stderr log end to end. All Daraja fetches carry hard timeouts —
+// an undici socket left hanging used to stall the STK push route for the
+// full client timeout and get the request cancelled on the phone.
 const config = require('../config');
 
 const m = config.mpesa;
 
+const OAUTH_TIMEOUT_MS = 15000;
+const PUSH_TIMEOUT_MS = 25000;
+const QUERY_TIMEOUT_MS = 15000;
+
 // OAuth token cache — Daraja tokens last ~1 hour; refresh 60s early.
 let cachedToken = null; // { token, expiresAtMs }
+
+const nowMs = () => Date.now();
+const elapsed = (t0) => `${Date.now() - t0}ms`;
 
 function isConfigured() {
   return Boolean(
@@ -21,6 +34,24 @@ function mpesaError(message, provider) {
   err.status = 502;
   err.provider = provider;
   return err;
+}
+
+// fetch() with a hard deadline; network/abort failures become readable
+// provider errors instead of undici's bare "fetch failed".
+async function darajaFetch(url, opts, timeoutMs, label) {
+  const t0 = nowMs();
+  try {
+    const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
+    console.error(`[MPESA] ${label} → HTTP ${res.status} in ${elapsed(t0)}`);
+    return res;
+  } catch (e) {
+    const reason =
+      e && e.name === 'TimeoutError'
+        ? `no response within ${timeoutMs}ms`
+        : (e && e.message) || 'network error';
+    console.error(`[MPESA] ${label} FAILED after ${elapsed(t0)}: ${reason}`);
+    throw mpesaError(`M-Pesa ${label} unreachable: ${reason}`, null);
+  }
 }
 
 function timestamp() {
@@ -51,18 +82,24 @@ function shortCodePassword(ts) {
 
 async function getAccessToken() {
   if (cachedToken && Date.now() < cachedToken.expiresAtMs) return cachedToken.token;
+  const t0 = nowMs();
+  console.error('[MPESA] OAuth token missing/expired — requesting a new one…');
   const basic = Buffer.from(`${m.consumerKey}:${m.consumerSecret}`).toString('base64');
   let res;
   let data;
   try {
-    res = await fetch(`${m.baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
-      headers: { Authorization: `Basic ${basic}` },
-    });
+    res = await darajaFetch(
+      `${m.baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
+      { headers: { Authorization: `Basic ${basic}` } },
+      OAUTH_TIMEOUT_MS,
+      'OAuth'
+    );
     data = await res.json().catch(() => null);
   } catch (e) {
-    throw mpesaError(`M-Pesa OAuth unreachable: ${e.message}`, null);
+    throw e; // already a readable mpesaError from darajaFetch
   }
   if (!res.ok || !data || !data.access_token) {
+    console.error(`[MPESA] OAuth rejected after ${elapsed(t0)}: ${(data && (data.errorMessage || data.error)) || `HTTP ${res.status}`}`);
     throw mpesaError(
       (data && (data.errorMessage || data.error)) ||
         'M-Pesa authentication failed. Check consumer key/secret.',
@@ -71,6 +108,7 @@ async function getAccessToken() {
   }
   const ttlS = Number(data.expires_in || 3599);
   cachedToken = { token: data.access_token, expiresAtMs: Date.now() + Math.max(60, ttlS - 60) * 1000 };
+  console.error(`[MPESA] OAuth OK in ${elapsed(t0)} — token cached for ~${Math.round((cachedToken.expiresAtMs - Date.now()) / 1000)}s`);
   return cachedToken.token;
 }
 
@@ -89,40 +127,52 @@ async function stkPush({ amount, phone, accountReference }) {
   }
   const msisdn = String(phone).replace(/^\+/, '');
   const ts = timestamp();
+  const t0 = nowMs();
   let res;
   let data;
   try {
-    res = await fetch(`${m.baseUrl}/mpesa/stkpush/v1/processrequest`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${await getAccessToken()}`,
-        'Content-Type': 'application/json',
+    res = await darajaFetch(
+      `${m.baseUrl}/mpesa/stkpush/v1/processrequest`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${await getAccessToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          BusinessShortCode: m.shortcode,
+          Password: shortCodePassword(ts),
+          Timestamp: ts,
+          TransactionType: m.transactionType,
+          Amount: Math.round(Number(amount)),
+          PartyA: msisdn,
+          PartyB: m.partyB,
+          PhoneNumber: msisdn,
+          CallBackURL: m.callbackUrl,
+          AccountReference: accountReference || m.accountReference,
+          TransactionDesc: m.description,
+        }),
       },
-      body: JSON.stringify({
-        BusinessShortCode: m.shortcode,
-        Password: shortCodePassword(ts),
-        Timestamp: ts,
-        TransactionType: m.transactionType,
-        Amount: Math.round(Number(amount)),
-        PartyA: msisdn,
-        PartyB: m.partyB,
-        PhoneNumber: msisdn,
-        CallBackURL: m.callbackUrl,
-        AccountReference: accountReference || m.accountReference,
-        TransactionDesc: m.description,
-      }),
-    });
+      PUSH_TIMEOUT_MS,
+      'STK push'
+    );
     data = await res.json().catch(() => null);
   } catch (e) {
-    throw mpesaError(`M-Pesa STK push unreachable: ${e.message}`, null);
+    throw e; // already a readable mpesaError from darajaFetch
   }
   if (String(data && data.ResponseCode) !== '0') {
+    console.error(
+      `[MPESA] STK push REJECTED in ${elapsed(t0)}: ${(data && (data.errorMessage || data.ResponseDescription)) || `HTTP ${res.status}`}`
+    );
     throw mpesaError(
       (data && (data.errorMessage || data.ResponseDescription)) ||
         `M-Pesa rejected the request (HTTP ${res.status}).`,
       data
     );
   }
+  console.error(
+    `[MPESA] STK push ACCEPTED in ${elapsed(t0)} — MerchantRequestID=${data.MerchantRequestID} CheckoutRequestID=${data.CheckoutRequestID} phone=${msisdn} amount=${Math.round(Number(amount))}`
+  );
   return data;
 }
 
@@ -143,30 +193,39 @@ async function stkQuery({ checkoutRequestId }) {
   let res;
   let data;
   try {
-    res = await fetch(`${m.baseUrl}/mpesa/stkpushquery/v1/query`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${await getAccessToken()}`,
-        'Content-Type': 'application/json',
+    res = await darajaFetch(
+      `${m.baseUrl}/mpesa/stkpushquery/v1/query`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${await getAccessToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          BusinessShortCode: m.shortcode,
+          Password: shortCodePassword(ts),
+          Timestamp: ts,
+          CheckoutRequestID: checkoutRequestId,
+        }),
       },
-      body: JSON.stringify({
-        BusinessShortCode: m.shortcode,
-        Password: shortCodePassword(ts),
-        Timestamp: ts,
-        CheckoutRequestID: checkoutRequestId,
-      }),
-    });
+      QUERY_TIMEOUT_MS,
+      'STK query'
+    );
     data = await res.json().catch(() => null);
   } catch (e) {
-    throw mpesaError(`M-Pesa query unreachable: ${e.message}`, null);
+    throw e; // already a readable mpesaError from darajaFetch
   }
   if (!res.ok || !data || data.errorMessage) {
+    console.error(`[MPESA] STK query FAILED: ${(data && (data.errorMessage || data.ResponseDescription)) || `HTTP ${res.status}`} (CheckoutRequestID=${checkoutRequestId})`);
     throw mpesaError(
       (data && (data.errorMessage || data.ResponseDescription)) ||
         `M-Pesa query failed (HTTP ${res.status}).`,
       data
     );
   }
+  console.error(
+    `[MPESA] STK query OK — CheckoutRequestID=${checkoutRequestId} ResultCode=${data.ResultCode} "${String(data.ResultDesc || '').slice(0, 80)}"`
+  );
   return data;
 }
 

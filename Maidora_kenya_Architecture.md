@@ -27,7 +27,7 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Disposable email block (§12) | ✅ LIVE | signup + email-verification re-check |
 | Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); Profile email sheet live: `POST /auth/update-email` + code entry (2026-10-29) |
 | Profile completeness §7 — BOTH roles (schema v4) | ✅ LIVE | maid: `maid_profiles` 6 checks (bio added); employer: `employer_profiles` (size/children/budget); role-aware `GET/PUT /api/profile` — **partial per-step saves both roles**; MULTISTEP wizard rebuilt as a FULL-SCREEN modal (progress header with % + tappable step chips, keyboard-safe, sticky save bar); HomeScreen banner FIRST then KYC (both roles) and updates instantly via shared AppContext snapshot; 3-step DOB picker |
-| M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven |
+| M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven; **respond-first since 2026-10-30** — stk-push answers in <1 s (row → paymentId → background Daraja push), killing the "fetch has been cancelled / prompt arrives anyway" race; every stage traced with `[MPESA]` lines in `stderr.log`; app polls + adopts pending rows on client timeout |
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
 | App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
@@ -384,6 +384,14 @@ new columns need explicit `ALTER TABLE` verification.
 5. **STK query lies in-flight** — never settle failures from it before
    `SETTLE_MS` (§6.2).
 6. **Tab bar** — no fixed height / absolute positioning (§4.5).
+7. **Gateway stdout is lost** — cPanel Passenger drops `console.log`; only
+   stderr persists in `~/maidora_app/stderr.log`. Any server-side line that
+   matters (payment tracing, settlement) MUST use `console.error`.
+8. **Client abort ≠ failed push** — a cancelled/timeout fetch on stk-push
+   means the APP gave up, not Safaricom. The gateway now answers stk-push
+   instantly (respond-first: row → 200 → background Daraja), so this race
+   is closed; never reintroduce a synchronous wait on Daraja inside a
+   request handler.
 
 ---
 

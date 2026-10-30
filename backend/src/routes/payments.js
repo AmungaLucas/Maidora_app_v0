@@ -79,11 +79,22 @@ async function grantKycUrgent(userId) {
 // POST /api/payments/stk-push
 // §5 verification gate — spending money is a platform service; unverified
 // accounts must clear phone/email verification first. Browsing stays open.
+//
+// RESPOND-FIRST (2026-10-30): the payment row is created BEFORE Daraja is
+// called, and the route answers the app IMMEDIATELY with the paymentId. The
+// Daraja push then runs in the background. This kills the race where Daraja
+// was slow, the app's 30s fetch was cancelled ("fetch has been cancelled"),
+// the app showed FAILED — and the prompt still arrived a minute later and
+// succeeded. The app now always lands in the "Check your phone" state and
+// polls /payments/:id; a Daraja rejection flips the row to failed with a
+// reason, which the poll surfaces. Same response shape as before plus
+// `queued: true` (older builds only read paymentId — still compatible).
 router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) => {
   try {
     if (!mpesa.isConfigured()) {
       return res.status(503).json({ message: 'M-Pesa is not configured yet. Try again later.' });
     }
+    const t0 = Date.now();
 
     const amount = Math.round(Number(req.body && req.body.amount));
     if (!Number.isFinite(amount) || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
@@ -100,37 +111,54 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       return res.status(400).json({ message: 'Enter a valid Kenyan number, e.g. 0712 345 678.' });
     }
     const purpose = String((req.body && req.body.purpose) || 'general').slice(0, 64);
+    console.error(`[MPESA] push request → user=${req.user.uid} amount=${amount} phone=${phone} purpose=${purpose}`);
 
-    // Persist the intent first so we always have a row for reconciliation.
+    // Persist the intent FIRST so we always have a row for reconciliation,
+    // then hand the app its paymentId without waiting for Daraja.
     const [ins] = await pool.query(
       "INSERT INTO payments (user_id, purpose, amount, phone, status) VALUES (?, ?, ?, ?, 'pending')",
       [req.user.uid, purpose, amount, phone]
     );
     const paymentId = ins.insertId;
+    console.error(`[MPESA] row #${paymentId} created (pending) in ${Date.now() - t0}ms`);
 
-    try {
-      const push = await mpesa.stkPush({
-        amount,
-        phone,
-        accountReference: undefined, // falls back to configured reference
-      });
-      await pool.query(
-        'UPDATE payments SET merchant_request_id = ?, checkout_request_id = ? WHERE id = ?',
-        [push.MerchantRequestID || null, push.CheckoutRequestID || null, paymentId]
-      );
-      return res.json({
-        message: push.CustomerMessage || 'Check your phone and enter your M-Pesa PIN.',
-        paymentId,
-        checkoutRequestId: push.CheckoutRequestID || null,
-      });
-    } catch (e) {
-      // Daraja refused the push — mark the row failed and surface the reason.
-      await pool.query("UPDATE payments SET status = 'failed', result_desc = ? WHERE id = ?", [
-        String(e.message).slice(0, 250),
-        paymentId,
-      ]);
-      throw e;
-    }
+    // Fire the Daraja push in the background — never awaited by the request.
+    // Every branch updates the same row; the callback stays the source of truth.
+    const dispatch = (async () => {
+      const dT0 = Date.now();
+      console.error(`[MPESA] row #${paymentId} dispatching Daraja STK push…`);
+      try {
+        const push = await mpesa.stkPush({
+          amount,
+          phone,
+          accountReference: undefined, // falls back to configured reference
+        });
+        await pool.query(
+          'UPDATE payments SET merchant_request_id = ?, checkout_request_id = ? WHERE id = ?',
+          [push.MerchantRequestID || null, push.CheckoutRequestID || null, paymentId]
+        );
+        console.error(
+          `[MPESA] row #${paymentId} push accepted in ${Date.now() - dT0}ms — prompt on its way to ${phone} (CheckoutRequestID=${push.CheckoutRequestID})`
+        );
+      } catch (e) {
+        // Daraja refused the push — mark the row failed so the app's polling
+        // shows the reason instead of waiting on a prompt that never comes.
+        await pool.query("UPDATE payments SET status = 'failed', result_desc = ? WHERE id = ?", [
+          String(e.message).slice(0, 250),
+          paymentId,
+        ]);
+        console.error(`[MPESA] row #${paymentId} push FAILED in ${Date.now() - dT0}ms: ${e.message}`);
+      }
+    })();
+    dispatch.catch((e) => console.error(`[MPESA] row #${paymentId} background push crashed:`, e && e.message));
+
+    console.error(`[MPESA] row #${paymentId} responding to app in ${Date.now() - t0}ms (push continues in background)`);
+    return res.json({
+      message: 'Check your phone and enter your M-Pesa PIN.',
+      paymentId,
+      checkoutRequestId: null, // filled on the row once Daraja accepts
+      queued: true,
+    });
   } catch (e) {
     next(e);
   }
@@ -188,6 +216,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             );
             p.status = 'success';
             p.result_desc = q.ResultDesc;
+            console.error(`[MPESA] row #${id} query SETTLED SUCCESS (age ${Math.round(ageMs / 1000)}s)`);
             if (p.purpose === 'kyc_urgent') await grantKycUrgent(p.user_id);
           } else if (rc !== null && DEFINITIVE_FAILURE_CODES.has(rc)) {
             if (ageMs >= SETTLE_MS) {
@@ -200,18 +229,23 @@ router.get('/:id', requireAuth, async (req, res, next) => {
               p.status = 'failed';
               p.result_code = Number(rc) || 0;
               p.result_desc = q.ResultDesc;
+              console.error(`[MPESA] row #${id} query SETTLED FAILED rc=${rc} (age ${Math.round(ageMs / 1000)}s)`);
             } else {
               // In-flight quirk: Daraja sometimes reports 1032 for a
               // transaction that is merely still awaiting a PIN. Trust the
               // callback — do NOT fail yet, tell the client when we will.
               live.settleIn = Math.max(0, Math.round((SETTLE_MS - ageMs) / 1000));
+              console.error(`[MPESA] row #${id} query rc=${rc} but in-flight (age ${Math.round(ageMs / 1000)}s) — staying pending, settle window opens in ${live.settleIn}s`);
             }
+          } else {
+            console.error(`[MPESA] row #${id} query rc=${rc} "${String(q.ResultDesc || '').slice(0, 80)}" — staying pending`);
           }
           // Any other outcome ("being processed", unknown codes) stays pending —
           // the Safaricom callback will settle it authoritatively.
         } catch (e) {
           // Query hiccup (e.g. "The transaction is being processed") — stay pending.
           live = { error: e.message };
+          console.error(`[MPESA] row #${id} query error (staying pending): ${e.message}`);
         }
       }
     }
@@ -254,8 +288,8 @@ router.post('/callback', async (req, res) => {
           cb.CheckoutRequestID,
         ]
       );
-      console.log(
-        `[payments/callback] ${cb.CheckoutRequestID} -> ${status} rc=${rc} ` +
+      console.error(
+        `[MPESA] callback → ${cb.CheckoutRequestID} SETTLED ${status.toUpperCase()} rc=${rc} ` +
           `receipt=${items.MpesaReceiptNumber || '-'} rows=${r.affectedRows} "${String(cb.ResultDesc || '')}"`
       );
       if (!r.affectedRows) {

@@ -12,6 +12,7 @@ export class ApiError extends Error {
 }
 
 async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } = {}) {
+  const reqT0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -39,23 +40,34 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
         data && data.field
       );
     }
+    // Payment-flow tracing — every M-Pesa request logs its round trip so the
+    // owner can follow the whole journey in the Metro/console output.
+    if (path.startsWith('/payments')) {
+      console.log(`[MPESA] ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
+    }
     return data;
   } catch (e) {
-    if (e.name === 'AbortError') {
+    const msg = String((e && e.message) || '');
+    const name = String((e && e.name) || '');
+    if (path.startsWith('/payments')) {
+      // Raw shape too — "fetch has been cancelled" style errors used to slip
+      // past the friendly mapping; log exactly what the device produced.
+      console.log(
+        `[MPESA] ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
+      );
+    }
+    // The device's fetch rejects with different shapes for a cancelled call
+    // (AbortError, or "fetch has been cancelled" / "aborted" in the message) —
+    // ALL of them mean the same thing: WE gave up waiting, the request may
+    // still have gone through. Never present that as a definite failure.
+    if (name === 'AbortError' || /abort|cancel/i.test(msg)) {
       throw new ApiError(
         'This is taking longer than usual. Check your connection and try again.',
         0,
         'TIMEOUT'
       );
     }
-    // Device is out of network/data coverage (Android: "Network request failed",
-    // iOS: "Network request failed" / "The Internet connection appears to be
-    // offline"). Surface a human message, never a raw stack-style error.
-    const msg = String((e && e.message) || '');
-    if (
-      e instanceof TypeError ||
-      /network request failed|failed to fetch|the internet connection|offline|not connected|no address|unreachable/i.test(msg)
-    ) {
+    if (e instanceof TypeError || /network request failed|failed to fetch|the internet connection|offline|not connected|no address|unreachable/i.test(msg)) {
       throw new ApiError(
         'You seem to be offline. Check your Wi-Fi or mobile data, then try again.',
         0,
