@@ -5,14 +5,14 @@
 -- once per release that changes the schema, then keep this file in sync.
 
 -- ─── Users — identity + split status model (§4.1/§4.2) ─────────────────────
+-- users.id IS the user identifier: a v4 UUID generated AT SIGNUP by the
+-- register route (crypto.randomUUID(), migrate_v7 — owner request
+-- 2026-10-31: "user id and its reference in (fk) should refer to the uuid").
+-- Non-enumerable, globally unique, safe to expose in JWTs/URLs/receipts.
+-- Every child table's user_id is CHAR(36) referencing users(id). There is
+-- no numeric user id anywhere anymore.
 CREATE TABLE IF NOT EXISTS users (
-  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  -- Public user identifier — v4 UUID generated at signup (migrate_v6, owner
-  -- request 2026-10-31). Non-enumerable, safe to expose; the BIGINT id stays
-  -- internal (JWT uid + FK joins). Fresh installs get NOT NULL: the register
-  -- route always supplies it. (The live-DB migration keeps it nullable until
-  -- the old node process is recycled — see migrate_v6.js.)
-  uuid CHAR(36) NOT NULL UNIQUE,
+  id CHAR(36) NOT NULL PRIMARY KEY,
   full_name VARCHAR(120) NOT NULL,
   email VARCHAR(190) NOT NULL UNIQUE,
   phone VARCHAR(16) NOT NULL UNIQUE,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- ─── Phone OTP (SMS, TalkSasa) — hashed codes, caps in services/otp.js ──────
 CREATE TABLE IF NOT EXISTS phone_otps (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id CHAR(36) NOT NULL,
   code_hash CHAR(64) NOT NULL,
   purpose VARCHAR(24) NOT NULL DEFAULT 'phone_verification',
   attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS phone_otps (
 -- ─── Email OTP (nodemailer SMTP) — optional verification path (§2/§5) ───────
 CREATE TABLE IF NOT EXISTS email_otps (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id CHAR(36) NOT NULL,
   code_hash CHAR(64) NOT NULL,
   purpose VARCHAR(24) NOT NULL DEFAULT 'email_verification',
   attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS email_otps (
 -- ─── Login attempts — §11 throttle data (account 5/15min, IP 20/hour) ───────
 CREATE TABLE IF NOT EXISTS login_attempts (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NULL,              -- known only when the account exists
+  user_id CHAR(36) NULL,                     -- known only when the account exists
   identifier VARCHAR(190) NOT NULL,          -- normalized email or phone as attempted
   ip VARCHAR(45) NULL,
   success TINYINT(1) NOT NULL DEFAULT 0,
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 -- Completeness (derived at read): date_of_birth, languages, job_type,
 -- years_experience, next_of_kin_* — all present = complete. Non-blocking.
 CREATE TABLE IF NOT EXISTS maid_profiles (
-  user_id BIGINT UNSIGNED PRIMARY KEY,
+  user_id CHAR(36) NOT NULL PRIMARY KEY,
   date_of_birth DATE NULL,
   gender ENUM('female','male','other') NULL,
   languages JSON NULL,                       -- array of strings, max 8
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS maid_profiles (
 -- Completeness (derived at read): household_size, num_children, budget_amount
 -- — all three present = complete. Non-blocking, mirrors maid_profiles.
 CREATE TABLE IF NOT EXISTS employer_profiles (
-  user_id BIGINT UNSIGNED PRIMARY KEY,
+  user_id CHAR(36) NOT NULL PRIMARY KEY,
   household_size TINYINT UNSIGNED NULL,      -- people living in the home, 1..30
   num_children TINYINT UNSIGNED NULL,        -- children at home, 0..20
   budget_amount INT UNSIGNED NULL,           -- KES per month offered
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS employer_profiles (
 -- ─── M-Pesa STK Push payments (Lipa na M-Pesa Online) — unchanged ───────────
 CREATE TABLE IF NOT EXISTS payments (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id CHAR(36) NOT NULL,
   purpose VARCHAR(64) NOT NULL DEFAULT 'general',
   amount DECIMAL(10,2) NOT NULL,
   phone VARCHAR(16) NOT NULL,
@@ -162,3 +162,35 @@ CREATE TABLE IF NOT EXISTS payments (
   INDEX idx_payments_checkout (checkout_request_id),
   CONSTRAINT fk_payments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Media assets — one row per uploaded file (avatars public, KYC private) ─
+CREATE TABLE IF NOT EXISTS media_assets (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  kind ENUM('avatar','id_front','id_back','selfie') NOT NULL,
+  storage_path VARCHAR(255) NOT NULL COMMENT 'path relative to the media root, e.g. avatars/2026/10/ab12.webp',
+  public_url VARCHAR(255) NULL COMMENT 'absolute URL when web-served (avatars); NULL for private KYC files',
+  bytes INT UNSIGNED NOT NULL DEFAULT 0,
+  mime VARCHAR(40) NOT NULL DEFAULT 'image/webp' COMMENT 'sniffed content type, never the claimed one',
+  sha256 CHAR(64) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_media_user (user_id),
+  INDEX idx_media_kind (kind),
+  CONSTRAINT fk_media_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='One row per uploaded media file — dashboard audit + cleanup';
+
+-- ─── Payment purposes + pricing catalog (admin-editable, no app release) ────
+CREATE TABLE IF NOT EXISTS payment_purposes (
+  code VARCHAR(32) NOT NULL COMMENT 'purpose code sent by the app',
+  label VARCHAR(64) NOT NULL COMMENT 'human name shown in the app + receipts',
+  description VARCHAR(190) NULL COMMENT 'one-liner for the purpose picker',
+  amount_kes DECIMAL(10,2) NULL COMMENT 'fixed price; NULL = caller picks the amount',
+  audience ENUM('system','both','househelp','employer') NOT NULL DEFAULT 'both' COMMENT 'which role sees it in the picker (system = always visible)',
+  stk_ref VARCHAR(12) NOT NULL DEFAULT 'MAIDORA' COMMENT 'STK AccountReference (<=12 alnum)',
+  stk_desc VARCHAR(13) NOT NULL DEFAULT 'Maidora' COMMENT 'STK TransactionDesc (<=13 chars)',
+  is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '0 = hidden + rejected at stk-push',
+  sort_order INT NOT NULL DEFAULT 100 COMMENT 'picker order, ascending',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Payment purpose + pricing catalog — edit here, no app release needed';

@@ -36,8 +36,19 @@ export default function RoleSelectScreen({ navigation, route }) {
   const [errorMessage, setErrorMessage] = useState('');
 
   const continueNext = async () => {
-    if (onboardingMode) {
+    const signedIn = Boolean(user && token);
+    if (signedIn) {
+      // EVERY signed-in state that reaches this screen is onboarding (§3.2):
+      // no role yet → save it; role already set → just enter the tabs.
+      // Never route a signed-in user into Signup — that legacy hop used to
+      // fire during the auth-flip remount window while the context was still
+      // settling, sending the fresh-verified user to "Create your account"
+      // (owner report 2026-10-31).
       if (saving) return;
+      if (user.role) {
+        navigation.reset({ index: 0, routes: [{ name: tabsRouteFor(user) }] });
+        return;
+      }
       setSaving(true);
       setErrorMessage('');
       try {
@@ -51,6 +62,8 @@ export default function RoleSelectScreen({ navigation, route }) {
       }
       return;
     }
+    // Not signed in — pre-signup convenience entry (documented param mode):
+    // remember the pick and continue to the account form.
     navigation.navigate('Signup', { role: selected });
   };
 

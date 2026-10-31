@@ -6,7 +6,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { captureCurrentLocation } from '../../location';
-import { tabsRouteFor } from '../../navigation/Tabs';
 import { colors, radius } from '../../theme';
 import { isValidEmail, isValidPhone } from '../../validation';
 import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
@@ -70,12 +69,11 @@ export default function LoginScreen({ navigation }) {
         return;
       }
       await signIn(res.token, res.user);
-      if (!res.user.role) {
-        // Verified but never onboarded → pick the role now (§3.2).
-        navigation.reset({ index: 0, routes: [{ name: 'RoleSelect' }] });
-        return;
-      }
-      navigation.reset({ index: 0, routes: [{ name: tabsRouteFor(res.user) }] });
+      // NO manual navigation here: signIn flips the root navigator's auth
+      // key and the stack remounts on the recomputed initial route —
+      // RoleSelect when the role is still unset (verified but never
+      // onboarded, §3.2), otherwise the role tabs. The old manual resets
+      // raced that remount (wrong-screen report 2026-10-31).
     } catch (e) {
       setErrorMessage(e.message || 'Could not log you in. Please try again.');
     } finally {

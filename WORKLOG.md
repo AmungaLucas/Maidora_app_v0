@@ -6,7 +6,83 @@
 
 ---
 
-## 2026-10-31 — `users.uuid`: public v4 identifier set AT SIGNUP (owner request)
+## 2026-10-31 — `users.id` IS the UUID: PK + every FK converted (owner request) · signup keyboard + location auto-fill · OTP-handoff navigation hardening
+
+Owner cleared the database "to try again from start" and upgraded the earlier
+uuid request: **"now user id and its reference in (fk) should refer to the
+uuid... so user id is now uuid"** — plus three field reports from testing the
+fresh-install experience. One deploy, one commit.
+
+**1. UUID primary key (migrate_v7, supersedes the additive v6).**
+`users.id` is now **CHAR(36) PRIMARY KEY holding a v4 UUID minted at signup**
+(`/register` → `crypto.randomUUID()`); the v6 `uuid` column is folded into id
+(`publicUser.uuid` stays as an alias). All six child `user_id` columns
+(phone_otps · email_otps · media_assets · payments · maid_profiles ·
+employer_profiles) are CHAR(36) FKs → users(id); `login_attempts.user_id`
+widened, no FK (by design). **Owner's two questions answered in the schema:**
+child tables KEEP their own BIGINT `id` (row identity: M-Pesa callback
+matching, OTP attempts, `ORDER BY id DESC` — nothing to do with user
+identity), and the AUTO_INCREMENT counters were reset to 1 (the 12/13/60-74
+drift = DELETE never rewinds the counter; only TRUNCATE does). `verify-otp`/
+`resend-otp` take the UUID as an opaque string (`parseUserRef`, no
+`Number()` coercion); referral codes are `M` + 6 random chars with a dup
+retry (no numeric id to derive from). migrate_v6 gained a superseded-guard.
+- **migrate_v7_uuid_pk.js** (idempotent): FKs dropped/rebuilt from
+  INFORMATION_SCHEMA; user rows re-identified to their v6 uuid; children
+  re-pointed through the captured old→new map; TRUNCATE + reset on
+  phone_otps/email_otps/login_attempts (all rows were expired OTPs / today's
+  2 failed attempts). **Deploy `deploy_uuid_pk_v7.py`**: mysqldump backup →
+  pass 1 → restart → pass 2 (verify-only no-op) → health/db-health green →
+  live probe: register 201 with `userId=145a568a-7aca-419f-962b-e65a935ef1a9`
+  (v4-shape, uuid alias matches), `users.id` PK = same value, wrong-code
+  verify-otp → clean 400 "Incorrect code" (uuid handoff parses), probe user
+  cascade-deleted. **UUID-PK DEPLOY PASSED.** Owner's account preserved,
+  now `5978f03a-650e-4e09-b948-0bf247f8baca`; FKs→users = 6; all counters = 1.
+
+**2. Signup keyboard fix (`Screen`, owner: "keyboard hides input fields").**
+The shared `Screen` passed `behavior={undefined}` on Android — and with
+`edgeToEdgeEnabled: true` the window no longer resizes for the keyboard
+(adjustResize is a no-op on Android 15+), so the password/referral fields
+disappeared behind it. `Screen` now wraps every screen in
+`KeyboardAvoidingView behavior='height'` on Android ('padding' on iOS) —
+all form screens benefit, not just signup.
+
+**3. Location auto-fill on signup (owner: "just fetch the current location
+and autofill that field... or whats your view").** Implemented the
+auto-fill with a consent guard: `fetchLocationIfPermitted()` (location.js)
+checks `getForegroundPermissionsAsync` — fills the Location field + coords
+on screen entry **only when permission is already granted** (login captures
+it silently, so it usually is); never prompts, never throws, never clobbers
+typed text. The explicit button (relabelled "Refresh my location") stays as
+the manual refresh and as the only path that may trigger the OS dialog.
+View: auto-fill without asking is right once permission is granted; asking
+in advance on a signup form would burn trust for a field the user can type.
+
+**4. OTP-handoff navigation hardening (owner: abandon OTP → relaunch →
+login → OTP resent → success "navigated me back to the signup screen";
+after a restart it landed RoleSelect → homepage as expected).**
+Root cause class: manual navigation racing the auth-key remount.
+`OtpScreen.verify` reset the stack AFTER `signIn` (the stack is being torn
+down mid-flight) and its `!pendingReg → Welcome` effect fired during the
+handoff (`setPendingReg(null)` clears context before `signIn` commits).
+`verify` now flips state only, behind a `finishingRef` that suppresses the
+empty-pending effect; the remount decides the landing (RoleSelect while no
+role, role tabs after onboarding). `LoginScreen` post-signIn resets removed
+(same principle). `RoleSelectScreen` no longer routes a SIGNED-IN user into
+Signup — the legacy param hop fired while the context was still settling in
+the remount window (the likely "back to signup" sighting); signed-in + role
+set → straight to the tabs. **What happens when signup is abandoned at the
+OTP (owner's question):** the account row exists immediately as
+`pending_verification` (no role); `pendingReg` survives restart for 30 min
+so relaunch resumes at the OTP screen; after expiry the handoff is lost and
+logging in routes back to OTP (server-correct — codes expire in 10 min,
+resend cooldown 60 s, hourly caps). The phone/email stays reserved (409 on
+re-register) but the login→OTP path always rescues it.
+
+Verified: `node --check` ×3 backend; Babel parse ×8 app files; 21/21 logic
+checks (`scripts/verify_uuid_auth_flow.py`).
+
+## 2026-10-31 — `users.uuid`: public v4 identifier set AT SIGNUP (owner request) — *superseded same day by the PK conversion above*
 
 Owner: "for user id we need to setup uuid at signup." Shipped as an ADDITIVE
 `users.uuid CHAR(36)` (UNIQUE `uk_users_uuid`) — **not** a PK-type switch: the

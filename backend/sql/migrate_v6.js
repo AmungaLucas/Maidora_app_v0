@@ -43,6 +43,24 @@ async function main() {
     multipleStatements: false,
   });
 
+  try {
+    // SUPERSEDED GUARD — since migrate_v7, users.id IS the CHAR(36) UUID and
+    // the separate uuid column no longer exists. Re-running this script on a
+    // converted database would re-add it; refuse instead.
+    const [[idCol]] = await conn.query(
+      `SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'id'`
+    );
+    if (String(idCol.DATA_TYPE).toLowerCase() === 'char') {
+      console.log('[migrate_v6] users.id is CHAR(36) — superseded by migrate_v7_uuid_pk, nothing to do.');
+      await conn.end();
+      return;
+    }
+  } catch (e) {
+    // If the probe itself fails, let the original logic surface the error.
+    console.error('[migrate_v6] guard probe failed:', e.message);
+  }
+
   const done = [];
   const skip = [];
 

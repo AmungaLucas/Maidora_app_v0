@@ -21,7 +21,7 @@ import { colors, radius } from './theme';
 
 // Screen — safe-area wrapper used by every screen.
 //   scroll   : wrap children in a ScrollView (default) or a plain View
-//   keyboard : wrap in a KeyboardAvoidingView (iOS padding)
+//   keyboard : wrap in a KeyboardAvoidingView (iOS padding / Android height)
 //   edges    : safe-area edges applied (tab screens pass without 'bottom' —
 //              the bottom tab bar owns that inset)
 // Every path below applies the shared 24px horizontal padding so no screen
@@ -48,7 +48,13 @@ export function Screen({ children, scroll = true, keyboard = true, style, edges 
       {offline ? <OfflineNote /> : null}
       {keyboard ? (
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // Android needs an explicit behavior: app.json sets
+          // edgeToEdgeEnabled, and under edge-to-edge the window no longer
+          // resizes for the keyboard (adjustResize is a no-op on Android
+          // 15+), so with the old `undefined` the keyboard covered the lower
+          // signup fields (owner report 2026-10-31). "height" shrinks the
+          // container so the ScrollView keeps every input reachable.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1 }}
         >
           {body}

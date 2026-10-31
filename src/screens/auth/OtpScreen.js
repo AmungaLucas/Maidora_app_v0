@@ -16,7 +16,6 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
-import { tabsRouteFor } from '../../navigation/Tabs';
 import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton, Screen } from '../../ui';
 
@@ -33,9 +32,14 @@ export default function OtpScreen({ navigation }) {
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const inputRef = useRef(null);
   const submittedRef = useRef('');
+  // True while a successful verify is handing off to the session — suppresses
+  // the !pendingReg reset below, which used to fire MID-HANDOFF (setPendingReg
+  // (null) clears the context before signIn commits) and reset the stack to
+  // Welcome behind the owner's back (wrong-screen report 2026-10-31).
+  const finishingRef = useRef(false);
 
   useEffect(() => {
-    if (!pendingReg) {
+    if (!pendingReg && !finishingRef.current) {
       // Direct nav with nothing pending — send the user back to the start.
       navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] });
     }
@@ -51,16 +55,18 @@ export default function OtpScreen({ navigation }) {
     if (!pendingReg || verifying || value.length !== CODE_LENGTH) return;
     setVerifying(true);
     setError('');
+    finishingRef.current = true;
     try {
       const res = await api.verifyOtp({ userId: pendingReg.userId, code: value });
       await setPendingReg(null);
       await signIn(res.token, res.user);
-      // No role yet → onboarding asks who you are (employer / househelp).
-      navigation.reset({
-        index: 0,
-        routes: [res.user && res.user.role ? { name: tabsRouteFor(res.user) } : { name: 'RoleSelect' }],
-      });
+      // NO manual navigation here (same principle as the 2026-10-31 logout
+      // fix): signIn flips the root navigator's auth key and the stack
+      // REMOUNTS on the recomputed initial route — RoleSelect while no role
+      // is set, the role tabs after onboarding. A manual reset here races
+      // that remount and could land the user on the wrong screen.
     } catch (e) {
+      finishingRef.current = false;
       setCode('');
       submittedRef.current = '';
       setError(e.message || 'Verification failed. Please try again.');

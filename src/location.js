@@ -32,3 +32,19 @@ export async function captureCurrentLocation() {
 
   return { latitude, longitude, locationName };
 }
+
+// Silent auto-fill: returns a fix ONLY when permission is ALREADY granted.
+// Never prompts, never throws — an un-granted/offline state simply returns
+// null and the field stays manual. The explicit "Use my current location"
+// button remains the only thing that may trigger the OS permission dialog
+// (owner request 2026-10-31: auto-fill without asking, permission is
+// typically already granted from the login capture).
+export async function fetchLocationIfPermitted() {
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+    return await captureCurrentLocation(); // permission granted → no prompt
+  } catch {
+    return null;
+  }
+}

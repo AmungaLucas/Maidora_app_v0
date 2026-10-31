@@ -35,6 +35,7 @@ const RESEND_AFTER_S = 60;
 const ROLES = ['employer', 'househelp'];
 
 function signToken(user) {
+  // uid IS the v4 UUID (users.id CHAR(36), migrate_v7) — opaque, non-enumerable.
   return jwt.sign(
     { uid: user.id, role: user.role || null },
     process.env.JWT_SECRET,
@@ -45,10 +46,9 @@ function signToken(user) {
 function publicUser(u) {
   return {
     id: u.id,
-    // Public identifier (v4 UUID, set at signup — migrate_v6). Non-enumerable
-    // and safe to expose/serialize; the BIGINT id stays internal (JWT uid,
-    // FK joins) and is kept here only for client compatibility.
-    uuid: u.uuid || null,
+    // users.id IS the public v4 UUID (migrate_v7). `uuid` is kept as an alias
+    // so any client still reading user.uuid keeps working.
+    uuid: u.id,
     fullName: u.full_name,
     email: u.email,
     phone: u.phone,
@@ -79,16 +79,27 @@ function maskPhone(p) {
   return `${p.slice(0, 6)}•••${p.slice(-3)}`;
 }
 
-function makeReferralCode(id) {
+function makeReferralCode() {
+  // No numeric id to derive from anymore (users.id is a UUID) — the code is
+  // M + 6 random chars from a 31-symbol alphabet (~888M combos). The caller
+  // retries on the (astronomically rare) UNIQUE collision.
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let suffix = '';
-  for (let i = 0; i < 3; i++) suffix += alphabet[cryptoRandom(alphabet.length)];
-  return `M${Number(id).toString(36).toUpperCase()}${suffix}`;
+  for (let i = 0; i < 6; i++) suffix += alphabet[cryptoRandom(alphabet.length)];
+  return `M${suffix}`;
 }
 
 function cryptoRandom(max) {
   const c = require('crypto');
   return c.randomInt(0, max);
+}
+
+// users.id is a CHAR(36) v4 UUID — validate the OTP handoff shape instead of
+// the old Number() coercion (which would turn any uuid into NaN).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function parseUserRef(raw) {
+  const s = String(raw || '').trim();
+  return UUID_RE.test(s) ? s : null;
 }
 
 async function sendOtpSms(phone, code) {
@@ -154,30 +165,40 @@ router.post('/register', async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(values.password, 10);
-    // users.uuid — public v4 identifier, generated AT SIGNUP (owner request
-    // 2026-10-31). Node randomUUID (v4), not MySQL UUID() (v1, MAC-based).
-    const userUuid = crypto.randomUUID();
+    // users.id — the v4 UUID itself, generated AT SIGNUP (owner request
+    // 2026-10-31: "user id is now uuid"). Node randomUUID (v4), not MySQL
+    // UUID() (v1, MAC-based). No numeric user id exists anymore.
+    const userId = crypto.randomUUID();
     const [ins] = await pool.query(
       `INSERT INTO users
-         (uuid, full_name, email, phone, role, password_hash,
+         (id, full_name, email, phone, role, password_hash,
           location_name, location_area, location_county, location_source,
           latitude, longitude, referred_by_code, account_status)
        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_verification')`,
       [
-        userUuid,
+        userId,
         values.fullName, values.email, values.phone, passwordHash,
         values.locationName, values.locationArea, values.locationCounty, values.locationSource,
         values.lat, values.lng, values.referralCode,
       ]
     );
-    await pool.query('UPDATE users SET my_referral_code = ? WHERE id = ?',
-      [makeReferralCode(ins.insertId), ins.insertId]);
+    // Referral code: retry on UNIQUE collision (makeReferralCode is random —
+    // ins.insertId is meaningless for a CHAR PK).
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await pool.query('UPDATE users SET my_referral_code = ? WHERE id = ?',
+          [makeReferralCode(), userId]);
+        break;
+      } catch (e) {
+        if (attempt === 4 || !e || e.code !== 'ER_DUP_ENTRY') throw e;
+      }
+    }
 
     // Send OTP — account creation still succeeds if the SMS provider hiccups.
     let otpSent = true;
     let note;
     try {
-      const code = await issueOtp(ins.insertId);
+      const code = await issueOtp(userId);
       await sendOtpSms(values.phone, code);
     } catch (e) {
       otpSent = false;
@@ -187,8 +208,8 @@ router.post('/register', async (req, res, next) => {
 
     return res.status(201).json({
       message: 'Account created. We sent a 6-digit code to your phone.',
-      userId: ins.insertId, // internal id — the OTP handoff uses it
-      uuid: userUuid, // public identifier (users.uuid)
+      userId, // the UUID — the OTP handoff uses it
+      uuid: userId, // alias kept for client compatibility
       phone: values.phone,
       maskedPhone: maskPhone(values.phone),
       role: null, // chosen at onboarding, after verification
@@ -204,7 +225,8 @@ router.post('/register', async (req, res, next) => {
 // POST /api/auth/verify-otp — §3.3: on confirm → active + phone stamped.
 router.post('/verify-otp', async (req, res, next) => {
   try {
-    const userId = Number(req.body && req.body.userId);
+    // userId is the signup UUID (migrate_v7) — opaque string, never coerced.
+    const userId = parseUserRef(req.body && req.body.userId);
     const code = String((req.body && req.body.code) || '').replace(/\D/g, '');
     if (!userId || code.length !== 6) {
       return res.status(400).json({ message: 'Enter the 6-digit code we sent you.' });
@@ -237,7 +259,7 @@ router.post('/verify-otp', async (req, res, next) => {
 // POST /api/auth/resend-otp
 router.post('/resend-otp', async (req, res, next) => {
   try {
-    const userId = Number(req.body && req.body.userId);
+    const userId = parseUserRef(req.body && req.body.userId); // signup UUID
     if (!userId) return res.status(400).json({ message: 'Missing user.' });
     const [[u]] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
     if (!u) return res.status(404).json({ message: 'Account not found.' });

@@ -1,11 +1,11 @@
 // Signup — creates the account (no role here), then hands off to OTP.
 // Role is chosen at ONBOARDING, after phone verification (spec §3.2) —
 // the server ignores any role sent from this screen.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, ApiError } from '../../api';
 import { useApp } from '../../context/AppContext';
-import { captureCurrentLocation } from '../../location';
+import { captureCurrentLocation, fetchLocationIfPermitted } from '../../location';
 import { LINKS, colors, radius } from '../../theme';
 import { validateSignup } from '../../validation';
 import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
@@ -29,10 +29,32 @@ export default function SignupScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [errorField, setErrorField] = useState(null);
+  const autofilledRef = useRef(false);
 
   const set = (key) => (v) => setForm((f) => ({ ...f, [key]: v }));
 
   const { valid, errors } = useMemo(() => validateSignup(form), [form]);
+
+  // AUTO-FILL (owner request 2026-10-31 — "we dont need to ask use my
+  // current location... just fetch the current location and autofill that
+  // field"): when location permission is ALREADY granted (it usually is —
+  // login captures it silently), the field fills itself on entry. Never
+  // prompts; if permission is missing the field stays manual and the button
+  // below is the one that asks. Only fills an EMPTY field — never clobbers
+  // what the user typed. Once per screen mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await fetchLocationIfPermitted();
+      if (!result || cancelled || autofilledRef.current) return;
+      autofilledRef.current = true;
+      setCoords({ latitude: result.latitude, longitude: result.longitude });
+      setForm((f) => (f.locationName ? f : { ...f, locationName: result.locationName || '' }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const useMyLocation = async () => {
     setLocating(true);
@@ -139,14 +161,16 @@ export default function SignupScreen({ navigation }) {
           autoCapitalize="words"
           error={fieldError('locationName')}
           hint={
-            coords
-              ? `Captured at ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)} — you can edit the name.`
-              : 'Tap "Use my current location" or type it yourself.'
+            locating
+              ? 'Finding your location…'
+              : coords
+                ? `Captured at ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)} — you can edit the name.`
+                : 'Filled from your current location when available — or type it yourself.'
           }
         />
         <Pressable onPress={useMyLocation} style={styles.locateBtn} disabled={locating}>
           <Text style={styles.locateBtnText}>
-            {locating ? 'Finding your location…' : '📍 Use my current location'}
+            {locating ? 'Finding your location…' : '📍 Refresh my location'}
           </Text>
         </Pressable>
 
