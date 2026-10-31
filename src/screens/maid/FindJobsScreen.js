@@ -17,6 +17,7 @@ import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { EmptyState, Screen, ScreenHeader } from '../../ui';
 import { ChipRow, JobCard, StatusChip } from '../../components/market/cards';
+import { JobCardSkeleton } from '../../components/market/skeletons';
 
 const JOB_TYPES = [
   { value: 'live_in', label: 'Live-in' },
@@ -111,9 +112,12 @@ export default function FindJobsScreen({ navigation }) {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.brand} />
-        </View>
+        <>
+          <JobCardSkeleton />
+          <JobCardSkeleton />
+          <JobCardSkeleton />
+          <JobCardSkeleton />
+        </>
       ) : error && !jobs.length ? (
         <EmptyState icon="cloud-offline-outline" title="Could not load" body={error} />
       ) : jobs.length === 0 ? (

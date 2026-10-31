@@ -18,6 +18,7 @@ import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { EmptyState, Screen, ScreenHeader } from '../../ui';
 import { ChipRow, MaidCard } from '../../components/market/cards';
+import { MaidCardSkeleton } from '../../components/market/skeletons';
 
 const JOB_TYPES = [
   { value: 'live_in', label: 'Live-in' },
@@ -132,9 +133,12 @@ export default function MaidsScreen({ navigation }) {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.brand} />
-        </View>
+        <>
+          <MaidCardSkeleton />
+          <MaidCardSkeleton />
+          <MaidCardSkeleton />
+          <MaidCardSkeleton />
+        </>
       ) : error && !maids.length ? (
         <EmptyState icon="cloud-offline-outline" title="Could not load" body={error} />
       ) : maids.length === 0 ? (

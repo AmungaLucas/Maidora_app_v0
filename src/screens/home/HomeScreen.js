@@ -1,30 +1,38 @@
 // Home tab — role-aware marketplace hub (both roles share the file).
 //
-// Owner fixes 2026-11-01:
-//   • Avatar — the header now renders the user's actual photo (users.avatar_url
-//     via publicUser) with the initials fallback; previously initials only.
-//   • Verification banner — the context snapshot used to go stale after the
-//     owner approved KYC server-side, so "Verification in review" stuck on
-//     Home forever. Home now re-syncs the session (/auth/me) on every focus;
-//     the moment kycStatus becomes 'approved' the banner is gone (and the
-//     Trust Badge shows up in listings everywhere).
+// Owner updates 2026-11-01 (v10 pass):
+//   • Stats row REMOVED (owner: "remove the stats section from homescreen").
+//   • Cache + skeletons — rails/postings/credits/boosts paint instantly from
+//     AsyncStorage (stale-while-revalidate, hooks/useCachedResource) and
+//     skeleton placeholders cover the very first launch (no cache yet).
+//   • Househelp rails from GET /jobs/rails (§15.5 JOB BOOST placement):
+//     FEATURED JOBS (paid boost, KES 99/7d) · JOBS NEAR ME (caller county,
+//     nationwide fallback flagged) · RECENTLY POSTED — mirrors the employer
+//     hub's maid rails.
+//   • Maid detail additions (stars, distance km) live on MaidProfileScreen.
 //
-// Employer hub — the owner's section list (2026-11-01, "refer to the docs"):
-//   FEATURED (§15.5 paid profile boost, KES 99/7d — placement is not
-//   purchasable any other way) · MAIDS NEAR ME (caller's county) · VERIFIED
-//   MAIDS (Trust Badge, §8) · TOP RATED (server quality-score proxy) — all
-//   four arrive in ONE /maids/rails call; §10 decay gates apply server-side.
-// Househelp hub: find-jobs CTA + §9 credits + boost strip (§15.5: featured
-// status / activate a banked boost / buy one via M-Pesa) + latest jobs.
+// Placement logic (Initial_app_deliberations §9/§11.1): "placement is not
+// purchasable any other way" — Featured rails are the ONLY paid slots; the
+// rest of the ordering is earned (verification, freshness, §10 decay).
+//
+// Employer hub rails (owner's section list 2026-11-01): FEATURED MAIDS ·
+// MAIDS NEAR ME · VERIFIED MAIDS · TOP RATED — all four in ONE /maids/rails
+// call; §10 decay gates apply server-side.
+//
+// Owner fixes 2026-11-01 (kept): header renders the real avatar photo; the
+// verification banner retires itself the moment the server says approved
+// (session re-sync on focus below).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useApp } from '../../context/AppContext';
 import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { useCachedResource } from '../../hooks/useCachedResource';
 import { ROLES, colors, radius } from '../../theme';
 import { Screen } from '../../ui';
-import { Avatar, JobCard, MaidCard, SectionTitle, formatKes } from '../../components/market/cards';
+import { Avatar, JobCard, MaidCard, SectionTitle } from '../../components/market/cards';
+import { RailSkeleton } from '../../components/market/skeletons';
 import { REASON_LABELS } from '../verification/kycShared';
 
 function firstName(fullName) {
@@ -67,37 +75,57 @@ function kycBannerBody(user) {
 export default function HomeScreen({ navigation }) {
   const { user, token, profileCompleteness: completeness, refreshCompleteness, updateUser } = useApp();
   const isEmployer = user?.role === 'employer';
+  const cacheScope = user?.id || 'anon';
 
   // CRITICAL loop-guard: `updateUser`'s identity changes whenever the user
   // state changes, and THIS effect itself updates the user — putting it in
   // the focus-effect deps would re-run the sync forever (api.me in a loop).
-  // Read it through a ref instead; deps stay [token, role] and the effect
-  // runs on focus + role flips only.
   const updateUserRef = useRef(updateUser);
   useEffect(() => {
     updateUserRef.current = updateUser;
   });
 
-  // Live hub data (previews + counters) — silent on failure.
-  const [hub, setHub] = useState({ jobs: [], openJobs: 0, applicants: 0, creditsLeft: null, unread: 0 });
-  // Employer: the four discovery rails (featured / nearby / verified / topRated).
-  const [rails, setRails] = useState(null);
-  // Househelp: §15.5 boost strip (featured window + banked entitlements).
-  const [boosts, setBoosts] = useState(null);
-  const [boostBusy, setBoostBusy] = useState(false);
+  // ── Cached hub data (stale-while-revalidate) ────────────────────────────
+  // Every resource paints its last-good payload instantly; skeletons show
+  // only on a true first launch. Enabled flags keep each role to its own
+  // calls — one hub, zero wasted round trips.
+  const maidRailsRes = useCachedResource(
+    `v1/maids-rails/${cacheScope}`, api.maidsRails, token, { enabled: isEmployer && !!token }
+  );
+  const myJobsRes = useCachedResource(
+    `v1/my-jobs/${cacheScope}`, api.myJobs, token, { enabled: isEmployer && !!token }
+  );
+  const jobRailsRes = useCachedResource(
+    `v1/jobs-rails/${cacheScope}`, api.jobsRails, token, { enabled: !isEmployer && !!token }
+  );
+  const creditsRes = useCachedResource(
+    `v1/credits/${cacheScope}`, api.applications, token, { enabled: !isEmployer && !!token }
+  );
+  const boostsRes = useCachedResource(
+    `v1/boosts/${cacheScope}`, api.boostsStatus, token, { enabled: !isEmployer && !!token }
+  );
 
+  // Revalidate on every FOCUS (tab screens stay mounted, so a mount-only
+  // fetch would go stale for the whole session). The first focus is skipped —
+  // the hook already fetched on mount.
+  const firstFocus = useRef(true);
   useFocusEffect(
     useCallback(() => {
       if (!token || !user?.role) return;
       refreshCompleteness();
+      if (firstFocus.current) {
+        firstFocus.current = false;
+      } else {
+        maidRailsRes.refresh();
+        myJobsRes.refresh();
+        jobRailsRes.refresh();
+        creditsRes.refresh();
+        boostsRes.refresh();
+      }
+      // Session re-sync — retires the KYC banner + refreshes the avatar the
+      // moment the server disagrees with the local snapshot (owner fix).
       let cancelled = false;
       (async () => {
-        // 1. Re-sync the session so kycStatus / avatarUrl are never stale —
-        //    this is what retires the verification banner the moment the
-        //    submission is approved (owner request 2026-11-01). Only write
-        //    when something the Home cares about actually changed — the
-        //    server returns a fresh token + object identity every time, and
-        //    a blind write here would also re-render needlessly.
         try {
           const me = await api.me(token);
           if (!cancelled && me?.user) {
@@ -117,46 +145,12 @@ export default function HomeScreen({ navigation }) {
         } catch {
           // offline / transient — keep the cached snapshot
         }
-        // 2. Hub content per role.
-        try {
-          if (isEmployer) {
-            const [jobsRes, railsRes] = await Promise.all([
-              api.myJobs(token).catch(() => null),
-              api.maidsRails(token).catch(() => null),
-            ]);
-            if (cancelled) return;
-            const jobs = jobsRes?.jobs || [];
-            setHub((h) => ({
-              ...h,
-              jobs: jobs.slice(0, 2),
-              openJobs: jobs.filter((j) => j.status === 'open').length,
-              applicants: jobs.reduce((n, j) => n + (j.applicantCount || 0), 0),
-            }));
-            if (railsRes) setRails(railsRes);
-          } else {
-            const [jobsRes, appsRes, boostRes] = await Promise.all([
-              api.jobs({ per_page: 2 }, token).catch(() => null),
-              api.applications(token).catch(() => null),
-              api.boostsStatus(token).catch(() => null),
-            ]);
-            if (cancelled) return;
-            setHub((h) => ({
-              ...h,
-              jobs: jobsRes?.jobs || [],
-              totalJobs: jobsRes?.total || 0,
-              creditsLeft: appsRes?.creditsLeft ?? null,
-            }));
-            if (boostRes) setBoosts(boostRes);
-          }
-        } catch {
-          // previews are best-effort
-        }
       })();
       return () => {
         cancelled = true;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, user?.role, isEmployer, refreshCompleteness])
+    }, [token, user?.role, refreshCompleteness])
   );
 
   const showCompletenessBanner =
@@ -164,14 +158,14 @@ export default function HomeScreen({ navigation }) {
   const kycApproved = user?.kycStatus === 'approved';
 
   // §15.5 — activate a banked profile boost (payment already made): extends
-  // the featured window by 7 days. Errors surface inline via window.alert.
+  // the featured window by 7 days.
+  const [boostBusy, setBoostBusy] = useState(false);
   async function activateBoost() {
     if (boostBusy) return;
     setBoostBusy(true);
     try {
       await api.boostProfile(token);
-      const fresh = await api.boostsStatus(token).catch(() => null);
-      if (fresh) setBoosts(fresh);
+      await boostsRes.refresh();
     } catch (e) {
       Alert.alert('Boost', e?.message || 'Could not activate the boost.');
     } finally {
@@ -179,16 +173,59 @@ export default function HomeScreen({ navigation }) {
     }
   }
 
-  // A discovery rail: title + See all + up to four maid cards. Hidden when
-  // the server returned nothing for it (empty featured rail ≠ broken home).
-  function Rail({ title, subtitle, maids }) {
-    if (!maids?.length) return null;
+  const rails = isEmployer ? maidRailsRes.data : null;
+  const railsLoading = isEmployer && maidRailsRes.loading;
+  const jobRails = !isEmployer ? jobRailsRes.data : null;
+  const jobRailsLoading = !isEmployer && jobRailsRes.loading;
+  const boosts = !isEmployer ? boostsRes.data : null;
+  const myJobs = (isEmployer ? myJobsRes.data?.jobs : null) || [];
+  const openJobs = myJobs.filter((j) => j.status === 'open').length;
+  const creditsLeft = !isEmployer && creditsRes.data ? creditsRes.data.creditsLeft : null;
+
+  // Maid rail — title + subtitle + up to four maid cards; skeleton rows on a
+  // true first load, hidden entirely when the server returns nothing.
+  function MaidRail({ title, subtitle, maids, loading }) {
+    const list = maids || [];
+    if (loading) {
+      return (
+        <>
+          <SectionTitle title={title} />
+          {subtitle ? <Text style={styles.railSub}>{subtitle}</Text> : null}
+          <RailSkeleton count={2} />
+        </>
+      );
+    }
+    if (!list.length) return null;
     return (
       <>
         <SectionTitle title={title} actionLabel="See all" onAction={() => navigation.navigate('MaidsTab')} />
         {subtitle ? <Text style={styles.railSub}>{subtitle}</Text> : null}
-        {maids.slice(0, 4).map((m) => (
+        {list.slice(0, 4).map((m) => (
           <MaidCard key={m.id} maid={m} onPress={() => navigation.navigate('MaidProfile', { maidId: m.id })} />
+        ))}
+      </>
+    );
+  }
+
+  // Job rail — mirror for the househelp hub (§15.5 job boost placement).
+  function JobRail({ title, subtitle, jobs, loading }) {
+    const list = jobs || [];
+    if (loading) {
+      return (
+        <>
+          <SectionTitle title={title} />
+          {subtitle ? <Text style={styles.railSub}>{subtitle}</Text> : null}
+          <RailSkeleton count={2} kind="job" />
+        </>
+      );
+    }
+    if (!list.length) return null;
+    return (
+      <>
+        <SectionTitle title={title} actionLabel="See all" onAction={() => navigation.navigate('FindJobsTab')} />
+        {subtitle ? <Text style={styles.railSub}>{subtitle}</Text> : null}
+        {list.slice(0, 4).map((j) => (
+          <JobCard key={j.id} job={j} onPress={() => navigation.navigate('JobDetail', { jobId: j.id })} />
         ))}
       </>
     );
@@ -201,18 +238,17 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.greeting}>Karibu, {firstName(user?.fullName)} 👋</Text>
           <Text style={styles.roleLine}>
             {isEmployer
-              ? `${ROLES.employer} · ${hub.openJobs ? `${hub.openJobs} open job${hub.openJobs === 1 ? '' : 's'}` : 'Maidora Kenya'}`
+              ? `${ROLES.employer}${openJobs ? ` · ${openJobs} open job${openJobs === 1 ? '' : 's'}` : ' · Maidora Kenya'}`
               : `${ROLES.househelp} · Maidora Kenya`}
           </Text>
         </View>
-        {/* Real avatar photo → Profile (initials fallback when none uploaded).
-            Owner fix 2026-11-01 — the header used to show initials only. */}
+        {/* Real avatar photo → Profile (initials fallback when none uploaded). */}
         <Pressable onPress={() => navigation.navigate('ProfileTab')} hitSlop={8} accessibilityLabel="Open my profile">
           <Avatar url={user?.avatarUrl} name={user?.fullName} size={44} />
         </Pressable>
       </View>
 
-      {/* ── Employer hub ─────────────────────────────────────────────────── */}
+      {/* ── Employer hub ─────────────────────────────────────────────── */}
       {isEmployer ? (
         <>
           <View style={styles.hero}>
@@ -233,64 +269,41 @@ export default function HomeScreen({ navigation }) {
             </View>
           </View>
 
-          <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{hub.openJobs}</Text>
-              <Text style={styles.statLabel}>Open jobs</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{hub.applicants}</Text>
-              <Text style={styles.statLabel}>Applicants</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={[styles.statNum, kycApproved && { color: colors.goldDark }]}>{kycApproved ? '✓' : '—'}</Text>
-              <Text style={styles.statLabel}>Trust Badge</Text>
-            </View>
-          </View>
-
-          {hub.jobs.length ? (
+          {myJobs.length ? (
             <>
               <SectionTitle title="Your postings" actionLabel="My Jobs" onAction={() => navigation.navigate('MyJobsTab')} />
-              {hub.jobs.map((j) => (
+              {myJobs.slice(0, 2).map((j) => (
                 <JobCard key={j.id} job={j} onPress={() => navigation.navigate('JobDetail', { jobId: j.id })} />
               ))}
             </>
           ) : null}
 
-          {rails === null ? (
-            <View style={styles.railsLoading}>
-              <ActivityIndicator color={colors.brand} size="small" />
-            </View>
-          ) : (
-            <>
-              {/* §15.5 FEATURED — the paid-placement rail (KES 99 / 7 days). */}
-              <Rail
-                title="Featured maids"
-                subtitle="Boosted placement — the top spot, bought fairly."
-                maids={rails?.featured}
-              />
-              {/* MAIDS NEAR ME — the caller's county; nationwide fallback is
-                  flagged so the heading never lies about "near". */}
-              <Rail
-                title="Maids near me"
-                subtitle={
-                  rails?.nearbyFallback
-                    ? 'No matches in your county yet — showing active profiles nationwide.'
-                    : rails?.nearbyCounty
-                    ? `Active in ${rails.nearbyCounty}`
-                    : null
-                }
-                maids={rails?.nearby}
-              />
-              {/* VERIFIED — Trust Badge holders (§8). */}
-              <Rail title="Verified maids" maids={rails?.verified} />
-              {/* TOP RATED — server quality score (badge, experience, profile
-                  depth, recency) until a real ratings feature exists. */}
-              <Rail title="Top rated maids" maids={rails?.topRated} />
-            </>
-          )}
+          {/* §15.5 FEATURED — the paid-placement rail (KES 99 / 7 days). */}
+          <MaidRail
+            title="Featured maids"
+            subtitle="Boosted placement — the top spot, bought fairly."
+            maids={rails?.featured}
+            loading={railsLoading}
+          />
+          {/* MAIDS NEAR ME — the caller's county; nationwide fallback is
+              flagged so the heading never lies about "near". */}
+          <MaidRail
+            title="Maids near me"
+            subtitle={
+              rails?.nearbyFallback
+                ? 'No matches in your county yet — showing active profiles nationwide.'
+                : rails?.nearbyCounty
+                ? `Active in ${rails.nearbyCounty}`
+                : null
+            }
+            maids={rails?.nearby}
+            loading={railsLoading}
+          />
+          {/* VERIFIED — Trust Badge holders (§8). */}
+          <MaidRail title="Verified maids" maids={rails?.verified} loading={railsLoading} />
+          {/* TOP RATED — Maidora score (verification, experience, profile
+              depth, recency) until a real ratings feature exists. */}
+          <MaidRail title="Top rated maids" maids={rails?.topRated} loading={railsLoading} />
         </>
       ) : (
         /* ── Househelp hub ──────────────────────────────────────────────── */
@@ -307,15 +320,15 @@ export default function HomeScreen({ navigation }) {
             </Pressable>
           </View>
 
-          {hub.creditsLeft !== null ? (
+          {creditsLeft !== null ? (
             <View style={styles.creditsCard}>
               <View style={styles.creditsNumWrap}>
-                <Text style={styles.creditsNum}>{hub.creditsLeft}</Text>
+                <Text style={styles.creditsNum}>{creditsLeft}</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.creditsTitle}>Free applications left</Text>
                 <Text style={styles.creditsBody}>
-                  {hub.creditsLeft > 0
+                  {creditsLeft > 0
                     ? 'Apply with one tap — no payment needed until these run out.'
                     : 'Used up — a top-up via M-Pesa is on the way. Browsing stays free.'}
                 </Text>
@@ -367,14 +380,27 @@ export default function HomeScreen({ navigation }) {
             )
           ) : null}
 
-          {hub.jobs.length ? (
-            <>
-              <SectionTitle title="Latest jobs" actionLabel="See all" onAction={() => navigation.navigate('FindJobsTab')} />
-              {hub.jobs.map((j) => (
-                <JobCard key={j.id} job={j} onPress={() => navigation.navigate('JobDetail', { jobId: j.id })} />
-              ))}
-            </>
-          ) : null}
+          {/* §15.5 JOB BOOST — the paid Featured Jobs rail (owner request:
+              "featured jobs, recently posted, etc"). */}
+          <JobRail
+            title="Featured jobs"
+            subtitle="Households that boosted their listing — answering first pays."
+            jobs={jobRails?.featured}
+            loading={jobRailsLoading}
+          />
+          <JobRail
+            title="Jobs near me"
+            subtitle={
+              jobRails?.nearbyFallback
+                ? 'No open jobs in your county yet — showing openings nationwide.'
+                : jobRails?.nearbyCounty
+                ? `Open in ${jobRails.nearbyCounty}`
+                : null
+            }
+            jobs={jobRails?.nearby}
+            loading={jobRailsLoading}
+          />
+          <JobRail title="Recently posted" jobs={jobRails?.recent} loading={jobRailsLoading} />
         </>
       )}
 
@@ -396,9 +422,7 @@ export default function HomeScreen({ navigation }) {
         </Pressable>
       ) : null}
 
-      {/* §8 — non-blocking KYC banner (BOTH roles) — GONE once approved.
-          The focus re-sync above keeps kycStatus fresh, so approval from the
-          review side clears this on the very next visit to Home. */}
+      {/* §8 — non-blocking KYC banner (BOTH roles) — GONE once approved. */}
       {!kycApproved ? (
         <Pressable style={styles.kycCard} onPress={() => navigation.navigate('KycIntro')}>
           <View style={styles.kycIconWrap}>
@@ -470,20 +494,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   ctaGhostText: { color: colors.cream, fontWeight: '800', fontSize: 14.5 },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingVertical: 14,
-    marginTop: 14,
-  },
-  stat: { flex: 1, alignItems: 'center', gap: 2 },
-  statNum: { fontSize: 20, fontWeight: '800', color: colors.ink },
-  statLabel: { fontSize: 11.5, fontWeight: '700', color: colors.muted },
-  statDivider: { width: 1, height: 30, backgroundColor: colors.line },
   creditsCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -525,7 +535,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
   },
-  railsLoading: { alignItems: 'center', paddingVertical: 22 },
   completenessCard: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -93,6 +93,41 @@ export function BoostChip() {
   );
 }
 
+// Star rating (owner request 2026-11-01: "star rating etc"). The value is the
+// SERVER's quality-score proxy normalized to 5 stars (ratingBasis 'proxy' —
+// no reviews table exists in any spec), so the UI labels it "Maidora score"
+// and never claims real user reviews. null rating → "New" chip.
+export function StarRating({ rating, basis, compact = false }) {
+  if (rating === null || rating === undefined) {
+    return (
+      <View style={[styles.scoreChip, compact && { paddingVertical: 2, paddingHorizontal: 7, gap: 3 }]}>
+        <Ionicons name="sparkles-outline" size={compact ? 10 : 12} color={colors.muted} />
+        <Text style={[styles.scoreText, { color: colors.muted }, compact && { fontSize: 10 }]}>New</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={[styles.scoreChip, compact && { paddingVertical: 2, paddingHorizontal: 7, gap: 3 }]}>
+      <Ionicons name="star" size={compact ? 11 : 13} color={colors.goldDark} />
+      <Text style={[styles.scoreText, compact && { fontSize: 10 }]}>{Number(rating).toFixed(1)}</Text>
+      {!compact ? <Text style={styles.scoreLabel}>{basis === 'proxy' ? 'Maidora score' : 'Rating'}</Text> : null}
+    </View>
+  );
+}
+
+// "3.2 km away" — server-computed haversine from the caller's coords; hidden
+// entirely when either party has no GPS (distanceKm null).
+export function DistanceLabel({ km, style }) {
+  if (km === null || km === undefined) return null;
+  const label = km < 1 ? '< 1 km away' : `${Number(km).toFixed(1)} km away`;
+  return (
+    <View style={styles.distanceRow}>
+      <Ionicons name="navigate-outline" size={11} color={colors.brandSoft} />
+      <Text style={[styles.distanceText, style]}>{label}</Text>
+    </View>
+  );
+}
+
 // ─── Chips — horizontal filter row ───────────────────────────────────────────
 export function ChipRow({ options, value, onChange, allLabel = 'All' }) {
   return (
@@ -146,6 +181,12 @@ export function MaidCard({ maid, onPress }) {
         <Text style={styles.cardSub} numberOfLines={1}>
           {[maid.locationArea, maid.locationCounty].filter(Boolean).join(', ') || 'Kenya'}
         </Text>
+        <View style={styles.cardMetaRow}>
+          <StarRating rating={maid.rating} basis={maid.ratingBasis} compact />
+          {maid.distanceKm !== null && maid.distanceKm !== undefined ? (
+            <DistanceLabel km={maid.distanceKm} />
+          ) : null}
+        </View>
         <Text style={styles.cardMeta} numberOfLines={1}>
           {[
             maid.jobTypeLabel,
@@ -169,6 +210,8 @@ export function JobCard({ job, onPress, right }) {
       <View style={{ flex: 1 }}>
         <View style={styles.cardTitleRow}>
           <Text style={styles.cardTitle} numberOfLines={1}>{job.title}</Text>
+          {/* §15.5 job boost — the paid Featured slot on the maid home. */}
+          {job.boosted ? <FeaturedChip compact /> : null}
           {right}
         </View>
         <Text style={styles.cardSub} numberOfLines={1}>
@@ -243,6 +286,20 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   boostText: { fontSize: 11, fontWeight: '800', color: colors.brandDark },
+  scoreChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.goldSoft,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+  },
+  scoreText: { fontSize: 11, fontWeight: '800', color: colors.goldDark },
+  scoreLabel: { fontSize: 10.5, fontWeight: '700', color: colors.muted },
+  distanceRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  distanceText: { fontSize: 11, fontWeight: '700', color: colors.brandSoft },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     borderRadius: radius.pill,
@@ -279,6 +336,7 @@ const styles = StyleSheet.create({
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   cardTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink, flexShrink: 1 },
   cardSub: { marginTop: 2, fontSize: 12, color: colors.muted },
+  cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   cardMeta: { marginTop: 3, fontSize: 12, fontWeight: '700', color: colors.goldDark },
   cardRight: { alignItems: 'flex-end', gap: 4 },
   lastActive: { fontSize: 10.5, fontWeight: '700', color: colors.muted },

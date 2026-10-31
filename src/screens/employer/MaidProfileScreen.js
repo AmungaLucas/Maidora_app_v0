@@ -1,15 +1,26 @@
 // MaidProfile — public profile of one house help (employer taps from search
-// or home preview). No contact details here by design: the only way in is the
+// or home rails). No contact details here by design: the only way in is the
 // gated Message action (POST /chat/threads, §5 verified gate).
+//
+// Owner redesign 2026-11-01 ("lets design good uis … maids details", "distance
+// in km, star rating etc"):
+//   • Hero — brand-green stage card, gold-ringed avatar, name + Trust Badge +
+//     Featured chip (§15.5 paid boost), age/gender + last-active line.
+//   • Score row — StarRating (server quality-score proxy → 5 stars; labelled
+//     "Maidora score" because NO reviews table exists in any spec) + the
+//     haversine distance from the caller (server-computed; hidden when either
+//     side has no GPS) + location.
+//   • Facts grid, languages, bio — content unchanged, visual pass.
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton, Screen } from '../../ui';
-import { Avatar, TrustBadge, formatKes } from '../../components/market/cards';
+import { Avatar, DistanceLabel, FeaturedChip, StarRating, TrustBadge, formatKes } from '../../components/market/cards';
+import { Skeleton } from '../../components/market/skeletons';
 
 export default function MaidProfileScreen({ route, navigation }) {
   const { maidId } = route.params || {};
@@ -59,10 +70,28 @@ export default function MaidProfileScreen({ route, navigation }) {
   }
 
   if (loading && !maid) {
+    // Skeleton hero — mirrors the real layout so nothing jumps when the
+    // profile arrives (owner: "have cache and skeletal loaders").
     return (
       <Screen keyboard={false}>
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.brand} size="large" />
+        <View style={styles.hero}>
+          <View style={styles.heroTopRow}>
+            <Skeleton style={{ width: 84, height: 84, borderRadius: 42 }} />
+            <View style={{ flex: 1, gap: 8 }}>
+              <Skeleton style={{ height: 18, width: '60%' }} />
+              <Skeleton style={{ height: 12, width: '40%' }} />
+              <Skeleton style={{ height: 12, width: '30%' }} />
+            </View>
+          </View>
+          <Skeleton style={{ height: 14, width: '80%', marginTop: 16 }} />
+        </View>
+        <View style={styles.factsGrid}>
+          {[0, 1, 2, 3].map((i) => (
+            <View key={i} style={styles.fact}>
+              <Skeleton style={{ height: 12, width: '70%' }} />
+              <Skeleton style={{ height: 14, width: '55%' }} />
+            </View>
+          ))}
         </View>
       </Screen>
     );
@@ -89,21 +118,41 @@ export default function MaidProfileScreen({ route, navigation }) {
 
   return (
     <Screen keyboard={false}>
-      <View style={styles.heroCard}>
-        <Avatar url={maid.avatarUrl} name={maid.fullName} size={78} />
-        <View style={{ flex: 1, gap: 4 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Text style={styles.name}>{maid.fullName}</Text>
-            {maid.trustBadge ? <TrustBadge /> : null}
+      {/* ── Hero — brand stage with the identity + paid placement ────────── */}
+      <View style={styles.hero}>
+        <View style={styles.heroTopRow}>
+          <View style={styles.avatarRing}>
+            <Avatar url={maid.avatarUrl} name={maid.fullName} size={84} />
           </View>
-          <Text style={styles.sub}>
-            {maid.age ? `${maid.age} years` : 'Age not shared'}
-            {maid.gender ? ` · ${maid.gender}` : ''}
-          </Text>
-          <Text style={styles.lastActive}>{maid.lastActiveLabel}</Text>
+          <View style={{ flex: 1, gap: 5 }}>
+            <Text style={styles.name} numberOfLines={2}>{maid.fullName}</Text>
+            <View style={styles.heroChips}>
+              {maid.trustBadge ? <TrustBadge /> : null}
+              {maid.featured ? <FeaturedChip /> : null}
+            </View>
+            <Text style={styles.heroSub}>
+              {maid.age ? `${maid.age} years` : 'Age not shared'}
+              {maid.gender ? ` · ${maid.gender}` : ''}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.heroMetaRow}>
+          {/* Star rating — Maidora score (server quality proxy), "New" until
+              there is real signal (badge, experience or ≥2 profile fields). */}
+          <StarRating rating={maid.rating} basis={maid.ratingBasis} />
+          {/* Haversine distance from the caller — only when both sides have
+              coordinates (server hides it otherwise; never guessed). */}
+          {maid.distanceKm !== null && maid.distanceKm !== undefined ? (
+            <DistanceLabel km={maid.distanceKm} style={styles.heroDistance} />
+          ) : null}
+          <View style={styles.lastActiveRow}>
+            <Ionicons name="time-outline" size={11} color={colors.brandSoft} />
+            <Text style={styles.lastActiveText}>{maid.lastActiveLabel}</Text>
+          </View>
         </View>
       </View>
 
+      {/* ── Facts grid ───────────────────────────────────────────────────── */}
       <View style={styles.factsGrid}>
         {facts.map((f) => (
           <View key={f.label} style={styles.fact}>
@@ -159,19 +208,35 @@ const styles = StyleSheet.create({
   center: { alignItems: 'center', gap: 10, paddingVertical: 60 },
   errorTitle: { fontSize: 16, fontWeight: '800', color: colors.ink, marginTop: 6 },
   errorBody: { color: colors.muted, textAlign: 'center', paddingHorizontal: 30, lineHeight: 20 },
-  heroCard: {
+  hero: {
+    backgroundColor: colors.brand,
+    borderRadius: radius.lg,
+    padding: 18,
+  },
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatarRing: {
+    padding: 3,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: colors.gold,
+    backgroundColor: 'rgba(247, 243, 233, 0.12)',
+  },
+  name: { fontSize: 20, fontWeight: '800', color: colors.white, lineHeight: 25 },
+  heroChips: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  heroSub: { fontSize: 12.5, color: colors.cream, opacity: 0.85 },
+  heroMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: 16,
+    gap: 10,
+    flexWrap: 'wrap',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(247, 243, 233, 0.22)',
   },
-  name: { fontSize: 19, fontWeight: '800', color: colors.ink },
-  sub: { fontSize: 13, color: colors.muted },
-  lastActive: { fontSize: 11.5, fontWeight: '700', color: colors.goldDark },
+  heroDistance: { color: colors.cream },
+  lastActiveRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  lastActiveText: { fontSize: 11, fontWeight: '700', color: colors.brandSoft },
   factsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
   fact: {
     width: '47.5%',

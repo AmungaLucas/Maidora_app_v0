@@ -3,6 +3,9 @@
 //   POST   /api/jobs                     employer posts (requireVerified)
 //   GET    /api/jobs                     househelp browse (open jobs; read-only
 //                                        scope §15.1 — requireAuth, no gate)
+//   GET    /api/jobs/rails               househelp-home rails in ONE call:
+//                                        featured (paid job boost §15.5),
+//                                        nearby (caller's county), recent
 //   GET    /api/jobs/mine                employer's own jobs + applicant counts
 //   GET    /api/jobs/:id                 detail; the owner also receives the
 //                                        applications with maid summaries
@@ -10,6 +13,14 @@
 //   POST   /api/jobs/:id/apply           househelp applies — §9: 2 lifetime free,
 //                                        withdrawn/rejected still consume, then
 //                                        402 paywall_required
+//
+// §15.5 JOB BOOST (owner request 2026-11-01, KES 99 / 7 days — placement
+// parity with profile boost; "placement is not purchasable any other way"):
+// jobs.boosted_until > NOW() → the job leads the feed AND the FEATURED JOBS
+// rail on the househelp home, with a Featured chip. Boost activation lives in
+// boosts.js (POST /boosts/jobs/:id) — same entitlement mechanics.
+//
+// Applications live on their own router (src/routes/applications.js):
 //   GET    /api/applications             role-aware list (mine / incoming)
 //   PATCH  /api/applications/:id         employer accept|reject · maid withdraw
 const express = require('express');
@@ -34,6 +45,9 @@ function shapeJob(r) {
     salaryAmount: r.salary_amount === null || r.salary_amount === undefined ? null : Number(r.salary_amount),
     status: r.status,
     createdAt: r.created_at,
+    // §15.5 job boost — paid placement flag + window (Featured chip).
+    boosted: Number(r.is_job_boosted) === 1,
+    boostedUntil: r.boosted_until || null,
     employer: r.employer_name
       ? {
           id: r.employer_id,
@@ -48,14 +62,21 @@ function shapeJob(r) {
 }
 
 // Column list shared by the job SELECTs (applicants + employer identity joined
-// by the caller; `me` param adds the caller's own application status).
+// by the caller; `me` param adds the caller's own application status). The
+// boost flag is computed per row — NOW() comparisons cannot ride an index but
+// these lists are small and the feed is LIMITed.
 function baseSelect(meUid) {
   return `
     j.*, u.full_name AS employer_name, u.avatar_url AS employer_avatar,
     u.kyc_status AS employer_kyc, u.id AS employer_id,
+    (j.boosted_until IS NOT NULL AND j.boosted_until > NOW()) AS is_job_boosted,
     (SELECT COUNT(*) FROM job_applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count
     ${meUid ? `, (SELECT a.status FROM job_applications a WHERE a.job_id = j.id AND a.maid_id = ? LIMIT 1) AS my_application_status` : ''}`;
 }
+
+// §15.5 — paid placement leads every list, then freshness (mirror of the
+// maids browse RANK_SQL).
+const JOB_RANK_SQL = 'ORDER BY (j.boosted_until IS NOT NULL AND j.boosted_until > NOW()) DESC, j.created_at DESC';
 
 function validateJobPayload(b) {
   const errors = {};
@@ -159,7 +180,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       `SELECT ${baseSelect(req.user.uid)}
        FROM jobs j JOIN users u ON u.id = j.employer_id
        WHERE ${whereSql}
-       ORDER BY j.created_at DESC
+       ${JOB_RANK_SQL}
        LIMIT ? OFFSET ?`,
       [req.user.uid, ...params, perPage, (page - 1) * perPage]
     );
@@ -180,6 +201,63 @@ router.get('/', requireAuth, async (req, res, next) => {
   }
 });
 
+// GET /api/jobs/rails — the househelp-home rails in ONE round trip
+// (mirror of /maids/rails). Rails (owner request 2026-11-01):
+//   featured — paid job boost active (jobs.boosted_until > NOW()),
+//              §15.5 placement, newest boost first
+//   nearby   — open jobs in the CALLER's county (nationwide fallback
+//              flagged, same contract as the maids nearby rail)
+//   recent   — newest open jobs regardless of location
+// Base gates match the feed exactly: open + employer account active.
+router.get('/rails', requireAuth, async (req, res, next) => {
+  try {
+    const perRail = Math.min(8, Math.max(1, parseInt(req.query.per_rail, 10) || 6));
+    const baseWhere = [
+      "j.status = 'open'",
+      "u.account_status = 'active'",
+    ];
+    const baseSql = `FROM jobs j JOIN users u ON u.id = j.employer_id WHERE ${baseWhere.join(' AND ')}`;
+
+    async function rail(where, order, params = []) {
+      const [rows] = await pool.query(
+        `SELECT ${baseSelect(req.user.uid)} ${baseSql}${where ? ` AND ${where}` : ''} ${order} LIMIT ${perRail}`,
+        // baseSelect(uid) prepends the my-application subselect placeholder —
+        // the caller's uid must lead the params array (the 500 the demo
+        // login caught within a minute of shipping).
+        [req.user.uid, ...params]
+      );
+      return rows.map(shapeJob);
+    }
+
+    // 1. FEATURED — the paid placement rail (§15.5 job boost).
+    const featured = await rail(
+      'j.boosted_until IS NOT NULL AND j.boosted_until > NOW()',
+      'ORDER BY j.boosted_until DESC, j.created_at DESC'
+    );
+
+    // 2. NEAR ME — caller's county first; nationwide fallback when empty.
+    const [[me]] = await pool.query('SELECT location_county FROM users WHERE id = ?', [req.user.uid]);
+    let nearby = [];
+    let nearbyCounty = me?.location_county || null;
+    let nearbyFallback = false;
+    if (nearbyCounty) {
+      nearby = await rail('j.county = ?', JOB_RANK_SQL, [nearbyCounty]);
+    }
+    if (!nearby.length) {
+      nearbyFallback = true;
+      nearbyCounty = null;
+      nearby = await rail('', JOB_RANK_SQL);
+    }
+
+    // 3. RECENTLY POSTED — newest open jobs, boost-aware order.
+    const recent = await rail('', JOB_RANK_SQL);
+
+    res.json({ featured, nearby, nearbyCounty, nearbyFallback, recent });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/jobs/mine — the employer's own postings (open + closed) with
 // applicant counts, newest first.
 router.get('/mine', requireAuth, requireVerified, async (req, res, next) => {
@@ -188,12 +266,10 @@ router.get('/mine', requireAuth, requireVerified, async (req, res, next) => {
       return res.status(403).json({ message: 'Only employer accounts have job postings.' });
     }
     const [rows] = await pool.query(
-      `SELECT j.*, u.full_name AS employer_name, u.avatar_url AS employer_avatar,
-              u.kyc_status AS employer_kyc, u.id AS employer_id,
-              (SELECT COUNT(*) FROM job_applications a WHERE a.job_id = j.id AND a.status != 'withdrawn') AS applicant_count
+      `SELECT ${baseSelect()}
        FROM jobs j JOIN users u ON u.id = j.employer_id
        WHERE j.employer_id = ?
-       ORDER BY j.created_at DESC
+       ORDER BY (j.boosted_until IS NOT NULL AND j.boosted_until > NOW()) DESC, j.created_at DESC
        LIMIT 100`,
       [req.user.uid]
     );

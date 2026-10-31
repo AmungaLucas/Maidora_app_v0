@@ -38,11 +38,65 @@ function lastActiveLabel(days) {
   return 'Archived';
 }
 
+// Haversine distance in km (1 decimal) — owner request 2026-11-01: "for maids
+// detail screen we need to have distance in km". Returns null when EITHER
+// party has no coordinates (signup GPS is optional) — the UI hides the chip
+// rather than guessing. Raw lat/lng of BOTH parties stays server-side; only
+// the derived km figure ever leaves the gateway (privacy).
+function distanceKm(aLat, aLng, bLat, bLng) {
+  if (aLat === null || aLat === undefined || aLng === null || aLng === undefined ||
+      bLat === null || bLat === undefined || bLng === null || bLng === undefined) return null;
+  const R = 6371; // km
+  const toRad = (d) => (Number(d) * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)) * 10) / 10;
+}
+
+// §15.5/§10 quality-score proxy (the same formula that drives the topRated
+// rail) normalized to a 5-star scale — owner request 2026-11-01: "star rating
+// etc". NO reviews table exists in any spec, so this is EXPLICITLY a proxy:
+//   trust badge 40 · experience (2/yr, cap 30) · §7 profile depth (4/field,
+//   cap 20) · fresh ≤3d 10 → 0..100 → /20 → 0.0..5.0 stars.
+// rating is null until there is SUBSTANTIVE signal (badge, experience or ≥2
+// profile fields) — freshness alone is activity, not quality, and must not
+// render as "0.5 stars". ratingBasis: 'proxy' lets the UI label it honestly
+// ("Maidora score") instead of implying user reviews.
+function qualityScore(r) {
+  const profileFields =
+    ((r.bio ? 1 : 0) + (r.languages && r.languages !== '[]' ? 1 : 0) +
+      (r.wage_expectation !== null && r.wage_expectation !== undefined ? 1 : 0) +
+      (r.job_type ? 1 : 0) + (r.date_of_birth ? 1 : 0));
+  return (
+    (r.kyc_status === 'approved' ? 40 : 0) +
+    Math.min(Number(r.years_experience || 0), 15) * 2 +
+    profileFields * 4 +
+    (r.days_idle !== null && Number(r.days_idle) <= 3 ? 10 : 0)
+  );
+}
+
+function starRating(r) {
+  const badge = r.kyc_status === 'approved';
+  const exp = Number(r.years_experience || 0);
+  const profileFields =
+    ((r.bio ? 1 : 0) + (r.languages && r.languages !== '[]' ? 1 : 0) +
+      (r.wage_expectation !== null && r.wage_expectation !== undefined ? 1 : 0) +
+      (r.job_type ? 1 : 0) + (r.date_of_birth ? 1 : 0));
+  if (!badge && !exp && profileFields < 2) return { rating: null, ratingBasis: 'proxy' };
+  const score = qualityScore(r);
+  return { rating: Math.round((score / 20) * 10) / 10, ratingBasis: 'proxy' };
+}
+
 // Shared SELECT for list + detail. NEVER exposes contact details or next of
-// kin — those move through gated chat/application flows only.
+// kin — those move through gated chat/application flows only. Coordinates are
+// read ONLY to compute distanceKm server-side; they are never returned.
 const SELECT_COLUMNS = `
   u.id AS user_id, u.full_name, u.avatar_url, u.location_county, u.location_area,
   u.location_name, u.last_active_at, u.kyc_status, u.created_at,
+  u.latitude AS u_lat, u.longitude AS u_lng,
   mp.date_of_birth, mp.gender, mp.languages, mp.job_type, mp.years_experience,
   mp.wage_expectation, mp.bio,
   mp.boosted_until,
@@ -55,10 +109,11 @@ const RANK_SQL =
   'ORDER BY (mp.boosted_until IS NOT NULL AND mp.boosted_until > NOW()) DESC, ' +
   '(u.last_active_at IS NOT NULL AND u.last_active_at > (NOW() - INTERVAL 14 DAY)) DESC, u.last_active_at DESC';
 
-function shapeMaid(r, { detailed = false } = {}) {
+function shapeMaid(r, { detailed = false, caller = null } = {}) {
   const age = r.date_of_birth
     ? Math.floor((Date.now() - new Date(r.date_of_birth).getTime()) / (365.25 * 24 * 3600 * 1000))
     : null;
+  const stars = starRating(r);
   return {
     id: r.user_id,
     fullName: r.full_name,
@@ -76,6 +131,12 @@ function shapeMaid(r, { detailed = false } = {}) {
     bio: detailed ? r.bio || null : r.bio ? String(r.bio).slice(0, 120) : null,
     age,
     gender: r.gender || null,
+    // Distance from the CALLER (haversine, km, 1dp) — null when either side
+    // lacks coordinates. Raw lat/lng never leaves the server.
+    distanceKm: caller ? distanceKm(caller.lat, caller.lng, r.u_lat, r.u_lng) : null,
+    // Star rating — Maidora quality-score proxy (see starRating above).
+    rating: stars.rating,
+    ratingBasis: stars.ratingBasis,
     // §10 + §4.3 — employer-facing "last seen" uses last_active_at
     lastActiveDays: r.days_idle === null ? null : Number(r.days_idle),
     lastActiveLabel: lastActiveLabel(r.days_idle === null ? null : Number(r.days_idle)),
@@ -144,6 +205,13 @@ router.get('/', requireAuth, async (req, res, next) => {
     // §15.5 featured first, then §10 ranking (Active maids, most-recent first).
     const orderSql = RANK_SQL;
 
+    // Caller coordinates — ONLY for the derived distanceKm (never returned).
+    const [[callerRow]] = await pool.query(
+      'SELECT latitude, longitude FROM users WHERE id = ?',
+      [req.user.uid]
+    );
+    const caller = callerRow ? { lat: callerRow.latitude, lng: callerRow.longitude } : null;
+
     const [[{ total }]] = await pool.query(
       `SELECT COUNT(*) AS total
        FROM users u LEFT JOIN maid_profiles mp ON mp.user_id = u.id
@@ -176,7 +244,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     }
 
     res.json({
-      maids: rows.map((r) => shapeMaid(r)),
+      maids: rows.map((r) => shapeMaid(r, { caller })),
       page,
       perPage,
       total,
@@ -211,12 +279,19 @@ router.get('/rails', requireAuth, async (req, res, next) => {
     ];
     const baseSql = `FROM users u LEFT JOIN maid_profiles mp ON mp.user_id = u.id WHERE ${baseWhere.join(' AND ')}`;
 
+    // Caller coordinates — ONLY for the derived distanceKm (never returned).
+    const [[callerRow]] = await pool.query(
+      'SELECT latitude, longitude FROM users WHERE id = ?',
+      [req.user.uid]
+    );
+    const caller = callerRow ? { lat: callerRow.latitude, lng: callerRow.longitude } : null;
+
     async function rail(where, order, params = []) {
       const [rows] = await pool.query(
         `SELECT ${SELECT_COLUMNS} ${baseSql}${where ? ` AND ${where}` : ''} ${order} LIMIT ${perRail}`,
         params
       );
-      return rows.map((r) => shapeMaid(r));
+      return rows.map((r) => shapeMaid(r, { caller }));
     }
 
     // 1. FEATURED — the paid placement rail.
@@ -284,7 +359,14 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     );
     if (!row) return res.status(404).json({ message: 'This profile is not available.' });
 
-    res.json({ maid: shapeMaid(row, { detailed: true }) });
+    // Caller coordinates — ONLY for the derived distanceKm (never returned).
+    const [[callerRow]] = await pool.query(
+      'SELECT latitude, longitude FROM users WHERE id = ?',
+      [req.user.uid]
+    );
+    const caller = callerRow ? { lat: callerRow.latitude, lng: callerRow.longitude } : null;
+
+    res.json({ maid: shapeMaid(row, { detailed: true, caller }) });
   } catch (e) {
     next(e);
   }

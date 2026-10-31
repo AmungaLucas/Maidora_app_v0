@@ -6,6 +6,74 @@
 
 ---
 
+## 2026-11-01 — v10: JOB BOOST (featured jobs on the maid home) · cached hubs + skeleton loaders · stats row removed · maid-detail stars + distance km (owner request)
+
+Owner: "check the initial deliberations documentation on the logics behind the placement also lets design good uis for the homescreen and the maids details. also have cache and skeletal loaders · remove the stats section from homescreen · lets introduce job boost so it can feature on maids homescreen · for maids homescreen we can have featured jobs., recently posted, etc · for maids detail screen we need to have distance in km, star rating etc".
+
+**Placement logic (from the docs, then built).** `Initial_app_deliberations.md`
+§9/§11.1: "placement is not purchasable any other way" — boosts are the ONLY
+paid slots (profile boost = 7-day rotating top-of-feed, application boost =
+top-3 slot); everything else is earned (verification, freshness, §10 decay).
+**Job boost** (owner-introduced this session) mirrors profile boost exactly:
+**KES 99 / 7 days** (placement parity; provisional until the owner reprices —
+`payment_purposes` is DB-editable without a release), GREATEST stacking, and
+it buys exactly one thing: the FEATURED JOBS rail on the househelp home +
+boosted-first ordering in the feed.
+
+**Backend v10 (deployed live, health green).** `sql/migrate_v10_job_boost.js`
+(idempotent): `jobs.boosted_until` + `idx_job_boost`; `payment_purposes` ←
+`job_boost` (99 / employer / active, guarded INSERT that never stomps an
+owner-edited price); demo sugar features ≤2 `@demo.maidora.co.ke` postings so
+the rail has day-one content. `jobs.js`: **GET /jobs/rails** (featured /
+nearby / recent in ONE call — mirror of /maids/rails, nearby falls back
+nationwide with a flag), boosted-first ordering in the feed + /mine,
+`shapeJob` gains `boosted`/`boostedUntil`. `boosts.js`: **POST
+/boosts/jobs/:id** (ownership + open-job guards; 402 `paywall_required`
+`{ purpose: 'job_boost' }`; atomic `consumed_at` take), `/status` employer
+branch → `{ jobBoostsBanked }`. `maids.js`: **distanceKm** (haversine
+computed server-side from users coords — raw lat/lng of BOTH parties never
+leaves the gateway; null when either side has no GPS) + **rating** (the §10
+quality-score proxy normalized to 5 stars — badge 40 · exp 2/yr cap 30 ·
+profile depth 4/field cap 20 · fresh 10 → /20; `ratingBasis: 'proxy'`; null
+until there is real signal because freshness alone must not render as
+"0.5 stars"). NO reviews table exists in any spec — the star is labelled
+"Maidora score", never user reviews.
+
+**Self-caught 500 (logged because it's a lesson).** The first /jobs/rails
+build forgot that `baseSelect(uid)` prepends the my-application subselect
+placeholder — the demo-maid login probe returned 500 within a minute of
+shipping. Fixed (params lead with `req.user.uid`) and redeployed via
+`scripts/deploy_rails_fix.py` (SFTP worked even while exec channels were
+being dropped).
+
+**Verification over HTTPS (demo logins — SSH-free evidence).** /jobs/rails
+200: 2 demo jobs featured (`boosted=true`) + nearby/recent rails populated;
+/maids/:id → rating 4.3 basis proxy + distanceKm; /maids/rails → all four
+rails with distance+rating (topRated[0] 5.0 · 11.5 km); /payments/purposes
+lists `job_boost` (99, employer); /boosts/status (employer) →
+`{ jobBoostsBanked }`. The write-path E2E (402 → bank → activate → featured)
+is scripted (`scripts/jobs_v10_e2e.py`) but BLOCKED this session by server
+SSH throttling (auth OK, exec channels dropped intermittently) — retry when
+the window opens; the read-path evidence above is live and green.
+
+**App: cache + skeletons + the two redesigns.** `hooks/useCachedResource.js`
+— AsyncStorage stale-while-revalidate (instant paint from cache, silent
+revalidate, a failed fetch never evicts the cached copy) +
+`components/market/skeletons.js` (pulse-animated Skeleton / MaidCard /
+JobCard / RailSkeleton; native driver). **HomeScreen**: stats row REMOVED
+(owner); househelp rails = **Featured Jobs / Jobs near me / Recently posted**
+(§15.5 job boost placement) with skeleton first-load; employer rails
+(Featured / Near me / Verified / Top rated) same treatment; revalidate on
+every focus (first focus skipped — mount already fetched); session re-sync
+kept (banner + avatar freshness). **MaidProfileScreen**: brand-green hero
+(gold-ringed avatar · Trust Badge + Featured chips), StarRating ("Maidora
+score") + DistanceLabel + last-active row, skeleton hero while loading.
+**MyJobsScreen**: Boost button per open job (banked → activate + reload;
+402 → Payment `purpose: 'job_boost'`; "Featured until {date} — boost again
+to extend"), skeleton loading state. MaidsScreen + FindJobsScreen: skeleton
+grids. `cards.js`: StarRating + DistanceLabel; MaidCard renders score + km;
+JobCard carries the Featured chip when boosted. schema.sql synced.
+
 ## 2026-11-01 — FIX: "Something went wrong" on every job post — missing employer_id SQL placeholder + marketplace log trail (owner report)
 
 Owner: "trying to create a job i get something went wrong please try again... lets log".

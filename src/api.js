@@ -213,9 +213,15 @@ export const api = {
   // POST /boosts/applications/:id — spend one banked boost on an application.
   boostApplication: (id, token) =>
     request(`/boosts/applications/${id}`, { method: 'POST', body: {}, token }),
+  // POST /boosts/jobs/:id — spend one banked job boost → featured 7d (§15.5).
+  boostJob: (id, token) =>
+    request(`/boosts/jobs/${id}`, { method: 'POST', body: {}, token }),
 
   // POST /jobs — employer posts a job (verified gate).
   postJob: (payload, token) => request('/jobs', { method: 'POST', body: payload, token }),
+  // GET /jobs/rails — househelp-home rails in ONE call (featured/nearby/
+  // recent; §15.5 job boost placement) — mirror of maidsRails.
+  jobsRails: (token) => request('/jobs/rails', { token }),
   // GET /jobs — open jobs feed (q, county, job_type, page).
   jobs: (params, token) => request(`/jobs${qs(params)}`, { token }),
   // GET /jobs/mine — the employer's own postings.

@@ -210,11 +210,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   area VARCHAR(120) NULL,
   salary_amount INT UNSIGNED NULL COMMENT 'KES per month, optional',
   status ENUM('open','closed') NOT NULL DEFAULT 'open',
+  boosted_until DATETIME NULL COMMENT 'Job Boost active until (KES 99/7d — featured on househelp home)',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_jobs_employer (employer_id),
   INDEX idx_jobs_status_created (status, created_at),
   INDEX idx_jobs_county (county),
+  INDEX idx_job_boost (boosted_until),
   CONSTRAINT fk_jobs_employer FOREIGN KEY (employer_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
