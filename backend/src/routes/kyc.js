@@ -296,6 +296,9 @@ router.post('/submit', requireVerified, async (req, res, next) => {
 });
 
 // GET /api/kyc/images/:field — streams the caller's OWN stored image bytes.
+// `?format=base64` returns a JSON envelope ({ ok, mime, dataBase64 }) for the
+// app: RN <Image> sources with Authorization headers fail silently on device,
+// so the client fetches through its proven wrapper and renders a data URI.
 // (Reviewer access comes with the review tooling — admin scope, later.)
 router.get('/images/:field', async (req, res, next) => {
   try {
@@ -317,6 +320,12 @@ router.get('/images/:field', async (req, res, next) => {
 
     const ext = path.extname(resolved).toLowerCase();
     const type = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+
+    if (req.query.format === 'base64') {
+      const data = fs.readFileSync(resolved);
+      return res.json({ ok: true, field, mime: type, dataBase64: data.toString('base64') });
+    }
+
     res.setHeader('Content-Type', type);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.sendFile(resolved);

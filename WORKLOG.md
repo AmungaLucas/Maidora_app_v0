@@ -6,6 +6,54 @@
 
 ---
 
+## 2026-10-31 — KYC resume thumbnails (data-URI read path) + selfie mirror + camera flip
+
+Owner live report: (1) "i took a selfie with the front camera and the image
+was captured but inverted left-right"; (2) "took photo of id front and back
+and when i restarted the app the state for the ids shows added but no
+photos… what happens to the photos i took? are they temporarily stored on
+phone? or do we start again"; (3) "for the selfie camera we can also add the
+functionality to flip to front camera too".
+
+- **Where the photos live — answered with DB facts**: uploads fire the
+  moment "Use photo" is tapped (NOT at review completion). Owner's own rows:
+  `media_assets` #6–#13 (id_front/id_back/selfie WebP), `users.kyc_*_url`
+  populated, `kyc_status` even reached `submitted`. Files sit at
+  `media.maidora.co.ke/kyc/*.webp` (0600, web-denied). Nothing is
+  phone-only — a restart loses nothing and there is nothing to retake.
+- **"Added but no photos" — ROOT CAUSE**: after a restart the checklist and
+  review screens render server images from `kyc://field` markers through
+  `<Image source={{ uri, headers: { Authorization } }}>` — the ONE path a
+  restart exercises (fresh captures always render local `file://` URIs) —
+  and header-authed RN `Image` sources fail silently on device: blank
+  thumbnails under a truthful "Added" chip. Fix: new `useKycImage` hook
+  (kycShared) — fetches `GET /kyc/images/:field?format=base64` through the
+  proven fetch wrapper (token auth, [KYC]-logged round trip) and renders a
+  data URI; local `file:`/`data:` URIs pass through untouched; a module
+  cache keyed by an epoch that `bumpKycImageEpoch()` bumps on every upload,
+  so a later resume never shows a pre-retake thumbnail.
+- **Backend**: `GET /api/kyc/images/:field?format=base64` →
+  `{ ok, field, mime, dataBase64 }` (raw byte stream unchanged for browser
+  / future dashboard use). Deployed via `scripts/deploy_kyc_img.py` — E2E:
+  base64 envelope 200 + `image/webp` + RIFF/WEBP magic, legacy stream
+  intact, missing field 404, test user/files cleaned.
+- **Selfie mirror**: Android expo-camera stores front-camera shots
+  UN-mirrored while the preview shows the natural mirror — so the confirm
+  stage (and everything downstream) showed a left-right inverted image.
+  `cropToWebp(..., flipH)` now flips FIRST when facing front on Android,
+  before the crop, so the crop rect (computed against the mirrored preview)
+  stays valid and the stored/confirmed photo is exactly what the user
+  framed (WYSIWYG). Gallery picks never flip.
+- **Flip camera**: new top-bar flip button in `GuidedCapture` (all modes —
+  doc/selfie/avatar) toggling front ↔ back live; the torch only shows (and
+  auto-resets) on the back camera; facing resets to the mode's natural
+  camera each open. Trace logs `camera: flip → front/back` and the shutter
+  line now carries the facing.
+- **Validation**: `scripts/smoke_kyc_capture.js` 38/38; live E2E in the
+  deploy script (base64 + legacy + 404); commit on `main`.
+
+---
+
 ## 2026-10-31 — KYC retake crash fix + end-to-end KYC flow trace
 
 Owner live report after walking the rebuilt flow: "great works fine… ERROR

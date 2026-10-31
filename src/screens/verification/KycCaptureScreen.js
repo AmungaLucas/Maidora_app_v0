@@ -27,9 +27,10 @@ import ActionSheet from '../../components/common/ActionSheet';
 import {
   IMG_KEY,
   KycShell,
-  kycImageSource,
+  bumpKycImageEpoch,
   normalizeDraft,
   s as ks,
+  useKycImage,
 } from './kycShared';
 import GuidedCapture from './GuidedCapture';
 import { kbOf, kycLog } from '../../kycLog';
@@ -116,6 +117,9 @@ export default function KycCaptureScreen({ navigation, route }) {
     try {
       await api.mediaKycUpload(field, shot.base64, shot.mime, token);
       kycLog(`upload OK · ${field} in ${Date.now() - t0}ms (${kbOf(shot.base64)} ${shot.mime})`);
+      // Invalidate the server-image cache so a later resume (kyc:// markers)
+      // re-fetches this field instead of showing the pre-retake thumbnail.
+      bumpKycImageEpoch();
       setDraft((d) => ({ ...d, images: { ...d.images, [IMG_KEY[field]]: shot.uri } }));
       setUploadState((m) => ({ ...m, [field]: 'idle' }));
       return true;
@@ -185,7 +189,8 @@ export default function KycCaptureScreen({ navigation, route }) {
               label={ITEM_COPY[it.field].label}
               sub={subFor(it.field)}
               status={statusFor(it.field)}
-              source={kycImageSource(draft.images[IMG_KEY[it.field]], it.field, token)}
+              marker={draft.images[IMG_KEY[it.field]]}
+              token={token}
               isLast={i === items.length - 1}
               onPress={() => openCapture(it.field)}
               onRetryUpload={() => shots[it.field] && upload(it.field, shots[it.field])}
@@ -253,8 +258,9 @@ export default function KycCaptureScreen({ navigation, route }) {
   );
 }
 
-function CaptureItem({ field, label, sub, status, source, isLast, onPress, onRetryUpload }) {
+function CaptureItem({ field, label, sub, status, marker, token, isLast, onPress, onRetryUpload }) {
   const isSelfie = field === 'selfie';
+  const source = useKycImage(marker, field, token);
   const chip =
     status === 'done'
       ? { icon: 'checkmark-circle', text: 'Added', bg: colors.brandSoftBg, fg: colors.forest }

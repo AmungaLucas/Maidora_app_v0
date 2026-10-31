@@ -13,9 +13,9 @@ import {
   IMG_KEY,
   KycShell,
   formatDate,
-  kycImageSource,
   normalizeDraft,
   s as ks,
+  useKycImage,
 } from './kycShared';
 import { kycLog } from '../../kycLog';
 
@@ -113,7 +113,7 @@ export default function KycReviewScreen({ navigation, route }) {
             <View key={img.field}>
               {i > 0 ? <View style={ks.reviewDivider} /> : null}
               <View style={ks.reviewImgRow}>
-                <Image source={kycImageSource(draft.images[IMG_KEY[img.field]], img.field, token)} style={img.thumb} resizeMode="cover" />
+                <ReviewThumb marker={draft.images[IMG_KEY[img.field]]} field={img.field} token={token} style={img.thumb} />
                 <Text style={[ks.reviewLabel, { flex: 1 }]}>{img.label}</Text>
                 <Pressable hitSlop={8} onPress={() => retake(img.field)}>
                   <Text style={ks.retakeLink}>Retake</Text>
@@ -148,3 +148,11 @@ const footnote = {
   lineHeight: 18,
   paddingHorizontal: 8,
 };
+
+// Draft-image thumbnail — local captures render from file, server-stored
+// images (kyc:// markers after a resume) load through useKycImage (authed
+// fetch → data URI). Placeholder while loading / on failure.
+function ReviewThumb({ marker, field, token, style }) {
+  const source = useKycImage(marker, field, token);
+  return <Image source={source} style={[style, !source && { backgroundColor: 'rgba(33,78,59,0.10)' }]} resizeMode="cover" />;
+}

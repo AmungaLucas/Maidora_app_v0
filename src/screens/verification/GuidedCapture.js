@@ -18,11 +18,16 @@
 //     stage, so every accepted photo — camera or gallery — fits the frame.
 //  5. Camera permission is requested in place; a denial renders an inline
 //     explainer with an "Open phone settings" shortcut (no OS popup).
+//  6. FLIP button (top bar) toggles front ↔ back in every mode, and
+//     front-camera SHOTS are mirrored back to match the preview (Android
+//     expo-camera stores front photos un-mirrored — the confirm stage used
+//     to show a left-right inverted image). WYSIWYG: confirm, review and
+//     the reviewer all see exactly what the user framed.
 //
 // Modes: 'doc' (back camera, torch, gallery) · 'selfie' (front camera,
 // no gallery — §33.1 live capture only) · 'avatar' (front camera, gallery).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -160,6 +165,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
 
   const [stage, setStage] = useState('camera'); // camera | confirm
   const [perm, setPerm] = useState(null); // 'granted' | 'denied' | 'undetermined'
+  const [facing, setFacing] = useState(cfg.facing); // live front ↔ back toggle
   const [container, setContainer] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -175,6 +181,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
     setError('');
     setTorch(false);
     setBusy(false);
+    setFacing(cfg.facing); // each open starts on the mode's natural camera
     galleryRef.current = startWithGallery;
     (async () => {
       try {
@@ -244,7 +251,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
     if (busy || !camRef.current) return;
     setError('');
     setBusy(true);
-    kycLog(`camera: shutter (mode=${mode})`);
+    kycLog(`camera: shutter (mode=${mode} facing=${facing})`);
     try {
       const photo = await camRef.current.takePictureAsync({
         quality: 0.95,
@@ -256,8 +263,12 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
       const crop =
         frameCropForPhoto(frame, container, photo) || centerCropForAspect(photo, cfg.aspect);
       if (!crop) throw new Error('Could not crop to the frame. Try again.');
-      const out = await cropToWebp(photo, crop, cfg.maxW);
-      kycLog(`camera: frame crop ${crop.width}x${crop.height} → ${out.mime} ${kbOf(out.base64)}`);
+      // Android stores front-camera shots un-mirrored while the preview
+      // shows the mirror — flip first so the crop rect (computed against
+      // the mirrored preview) stays valid and the result is WYSIWYG.
+      const flipH = facing === 'front' && Platform.OS === 'android';
+      const out = await cropToWebp(photo, crop, cfg.maxW, flipH);
+      kycLog(`camera: frame crop ${crop.width}x${crop.height}${flipH ? ' (mirrored to match preview)' : ''} → ${out.mime} ${kbOf(out.base64)}`);
       setResult(out);
       setStage('confirm'); // unmounts the CameraView
     } catch (e) {
@@ -317,8 +328,8 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
             <CameraView
               ref={camRef}
               style={StyleSheet.absoluteFill}
-              facing={cfg.facing}
-              enableTorch={cfg.torch && torch}
+              facing={facing}
+              enableTorch={cfg.torch && facing === 'back' && torch}
             />
 
             {/* scrim + guide frame (non-interactive) */}
@@ -351,20 +362,35 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
               </Svg>
             ) : null}
 
-            {/* top bar — close / torch */}
+            {/* top bar — close / torch (back cam) / flip */}
             <View style={[styles.topBar, { paddingTop: (insets.top || 12) + 6 }]} pointerEvents="box-none">
               <Pressable style={styles.circleBtn} onPress={() => !busy && onClose?.()} accessibilityLabel="Close camera">
                 <Ionicons name="close" size={24} color={colors.cream} />
               </Pressable>
-              {cfg.torch ? (
+              <View style={styles.topBarRight} pointerEvents="box-none">
+                {cfg.torch && facing === 'back' ? (
+                  <Pressable
+                    style={[styles.circleBtn, torch && styles.circleBtnActive]}
+                    onPress={() => setTorch((t) => !t)}
+                    accessibilityLabel="Toggle torch"
+                  >
+                    <Ionicons name="flashlight" size={22} color={colors.cream} />
+                  </Pressable>
+                ) : null}
                 <Pressable
-                  style={[styles.circleBtn, torch && styles.circleBtnActive]}
-                  onPress={() => setTorch((t) => !t)}
-                  accessibilityLabel="Toggle torch"
+                  style={styles.circleBtn}
+                  onPress={() => {
+                    if (busy) return;
+                    const next = facing === 'front' ? 'back' : 'front';
+                    kycLog(`camera: flip → ${next}`);
+                    setTorch(false);
+                    setFacing(next);
+                  }}
+                  accessibilityLabel="Flip camera"
                 >
-                  <Ionicons name="flashlight" size={22} color={colors.cream} />
+                  <Ionicons name="camera-reverse-outline" size={24} color={colors.cream} />
                 </Pressable>
-              ) : null}
+              </View>
             </View>
 
             {/* hint under the frame */}
@@ -507,6 +533,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   circleBtn: {
     width: 46,
     height: 46,

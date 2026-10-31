@@ -172,4 +172,10 @@ export const api = {
     }),
   // POST /kyc/submit — completeness validated server-side; §5 gate applies
   kycSubmit: (token) => request('/kyc/submit', { method: 'POST', token, timeoutMs: 30000 }),
+  // GET /kyc/images/:field?format=base64 — the caller's own stored KYC image
+  // as { ok, mime, dataBase64 }. The app renders it as a data URI because
+  // header-authed <Image> sources fail silently on device (blank thumbnails
+  // after a restart). Gets [KYC] round-trip logging like every other call.
+  kycImageFetch: (field, token) =>
+    request(`/kyc/images/${field}?format=base64`, { token, timeoutMs: 30000 }),
 };

@@ -13,11 +13,14 @@
 //  - `launchCameraAsync` (a foreign activity + `allowsEditing` editor) was
 //    reloading Expo Go after every capture — the in-app CameraView never
 //    leaves the app, which also fixes the "app restarts on OK" bug.
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import { API_BASE_URL, colors, radius } from '../../theme';
+import { colors, radius } from '../../theme';
 import { ScreenHeader } from '../../ui';
+import { api } from '../../api';
+import { kycLog } from '../../kycLog';
 
 // Flow steps after the capture consolidation: personal details, document
 // type, the photos checklist (front + back + selfie on one screen), review.
@@ -77,15 +80,71 @@ export function normalizeDraft(p) {
   return d;
 }
 
-// RN Image source for a draft image URI — freshly captured files load
-// locally; the `kyc://field` marker (image exists server-side) streams from
-// the authenticated /kyc/images/:field route with the bearer token.
-export function kycImageSource(uri, field, token) {
-  if (!uri) return null;
-  if (/^(file|content|ph|asset):/.test(uri) || uri.startsWith('data:')) {
-    return { uri };
+// ---- draft image sources ---------------------------------------------------
+// Server-stored KYC images (the `kyc://field` markers a resumed flow carries)
+// are fetched through the authenticated API as base64 JSON and rendered as
+// data URIs. The previous approach — Authorization headers on a raw <Image>
+// source — fails SILENTLY on device (blank thumbnails after a restart, the
+// first time that path is ever exercised); the fetch wrapper is proven and
+// every round trip now shows up under [KYC]. Local captures (file://) and
+// data URIs pass straight through, no fetch.
+let imgEpoch = 0;
+
+// Bump whenever a fresh upload lands, so a later resume never shows a stale
+// cached thumbnail for a field that was just retaken.
+export function bumpKycImageEpoch() {
+  imgEpoch += 1;
+}
+
+const imgCache = new Map(); // `${epoch}:${field}` -> { uri: 'data:…' }
+
+function localImageSource(marker) {
+  if (marker && (/^(file|content|ph|asset):/.test(marker) || marker.startsWith('data:'))) {
+    return { uri: marker };
   }
-  return { uri: `${API_BASE_URL}/kyc/images/${field}`, headers: { Authorization: `Bearer ${token}` } };
+  return null; // kyc:// marker → needs the authenticated fetch below
+}
+
+export function useKycImage(marker, field, token) {
+  const [source, setSource] = useState(() => localImageSource(marker));
+
+  useEffect(() => {
+    const local = localImageSource(marker);
+    if (local) {
+      setSource(local);
+      return undefined;
+    }
+    if (!marker || !token) {
+      setSource(null);
+      return undefined;
+    }
+    const key = `${imgEpoch}:${field}`;
+    const cached = imgCache.get(key);
+    if (cached) {
+      setSource(cached);
+      return undefined;
+    }
+    setSource(null);
+    let alive = true;
+    (async () => {
+      try {
+        const res = await api.kycImageFetch(field, token);
+        const src = {
+          uri: `data:${(res && res.mime) || 'image/webp'};base64,${(res && res.dataBase64) || ''}`,
+        };
+        imgCache.set(key, src);
+        if (alive) setSource(src);
+      } catch (e) {
+        kycLog(`image load FAILED · ${field} — ${(e && e.message) || e} (placeholder shown; re-enters the screen to retry)`);
+        // source stays null — the placeholder icon shows until a re-mount
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [marker, field, token]);
+
+  return source;
 }
 
 export function calcAge(dobYyyyMmDd) {
@@ -206,9 +265,14 @@ export function centerCropForAspect(photo, aspect) {
   };
 }
 
-// Crop (optional) → downscale → WebP. Returns { uri, base64, mime }.
-export async function cropToWebp(picked, crop, maxW = 1400) {
+// Crop (optional) → optional horizontal flip → downscale → WebP.
+// flipH: front-camera shots on Android store UN-mirrored while the preview
+// shows the natural mirror — flip FIRST so the crop rect (computed against
+// the mirrored preview) stays valid and the confirmed photo is exactly what
+// the user framed (WYSIWYG). Gallery picks never flip.
+export async function cropToWebp(picked, crop, maxW = 1400, flipH = false) {
   let ref = ImageManipulator.manipulate(picked.uri);
+  if (flipH) ref = ref.flip({ horizontal: true });
   if (crop && crop.width > 0 && crop.height > 0) ref = ref.crop(crop);
   const w = crop ? crop.width : picked.width || 0;
   if (w > maxW) ref = ref.resize({ width: maxW });
