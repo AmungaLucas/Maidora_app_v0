@@ -31,7 +31,7 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
 | App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
-| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending/failed/success cards share a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN [elapsed timer] → confirmed [receipt chip]); a push rejection fails at stage 2, a PIN/settlement failure at stage 3. **No more full-screen veil** — the button's own radar + "Sending push…" carries the wait (gateway answers in single-digit ms; #32's 28 s was mobile network); card crossfade (opacity + 18 px rise) retained |
+| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending card shows a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN → confirmed), a **countdown** ("3:28 remaining") and a "Didn't get a prompt?" tips toggle; **success/failure are now SEPARATE screens** — subtle spring-checkmark celebration (receipt, amount, paid-at EAT, never on the synchronous ResponseCode 0) and a calm code-specific failure card (Try Again + Back to Home); **resume banner** offers to reattach a ≤10-min-old pending row on mount (app-closed-mid-payment edge case); no full-screen veil — the button's radar carries the push call; card crossfade retained |
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
@@ -345,14 +345,23 @@ retries), simulates the late write → `late row write matched on retry #2`
   the callback's receipt replaces *"Confirming…"*.
 - Failure → human sentences keyed by `result_code`: 1 insufficient balance ·
   1032 cancelled · 1037 expired · 2001 wrong PIN.
-- **Staged progress card (2026-10-31)**: pending/failed/success share one
+- **Staged progress card (2026-10-31)**: the PENDING card shows a
   4-step tracker — ① Payment accepted by gateway (row exists) ② Prompt sent
   to your phone (`checkoutRequestId` non-null) ③ Enter your M-Pesa PIN
-  (elapsed timer) ④ Payment confirmed (receipt chip); failures mark the
-  stage that died. No full-screen veil between the button and the card —
-  the PrimaryButton's radar loading state carries the push call; ticks skip
-  while one is in flight and `doneRef` swallows stray ticks (one end-log,
-  always).
+  (countdown mirroring the polling window) ④ Payment confirmed — plus a
+  "Didn't get a prompt?" tips toggle. No full-screen veil between the button
+  and the card — the PrimaryButton's radar loading state carries the push
+  call; ticks skip while one is in flight and `doneRef` swallows stray
+  ticks (one end-log, always).
+- **Separate outcome screens (2026-10-31 UX round)**: SUCCESS gets its own
+  celebration (subtle spring checkmark, receipt, amount, paid-at EAT —
+  deterministic UTC+3 formatting) and FAILURE a calm code-specific card —
+  the tracker is progress-only and never appears on outcome screens.
+  Celebration fires only on a backend-confirmed ResultCode 0 (callback or
+  authoritative query), never on the synchronous push ResponseCode.
+- **Resume on mount**: pending rows younger than 10 min trigger a
+  "Resume watching / Dismiss" banner — covers the app-closed-mid-payment
+  edge case (the gateway + M-Pesa SMS settle regardless).
 
 ### 6.5 Test practices
 

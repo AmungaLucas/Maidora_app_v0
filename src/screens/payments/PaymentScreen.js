@@ -1,34 +1,48 @@
 // M-Pesa payment — live STK Push against the Daraja production gateway.
 // Flow: choose amount -> "Send STK Push" (the button itself spins — no
-// full-screen veil; the gateway answers in milliseconds and a blackout
-// during a network hiccup reads as a freeze) -> the staged progress card
-// crossfades in -> the user keys their M-Pesa PIN -> the SAFARICOM CALLBACK
-// settles the payment (source of truth; the gateway only uses the Daraja
-// query API to confirm success early, never to fail an in-flight prompt)
-// -> the receipt code lands on stage 4.
+// full-screen veil; the gateway answers in milliseconds) -> the staged
+// progress card crossfades in -> the user keys their M-Pesa PIN -> the
+// SAFARICOM CALLBACK settles the payment (source of truth; the gateway only
+// uses the Daraja query API to confirm success early, never to fail an
+// in-flight prompt) -> a dedicated SUCCESS screen celebrates with the
+// receipt. Failure gets its own calm card with the reason mapped from the
+// result code — never a generic "Payment failed".
 //
-// The progress card is a truthful step tracker driven by REAL events, not
-// cosmetic timers:
-//   1. Payment accepted by gateway   — always done once the card shows
-//                                      (respond-first: the row exists).
-//   2. Prompt sent to your phone     — done when the row carries a
-//                                      checkout_request_id (Daraja accepted
-//                                      the push, seen on the next poll).
-//   3. Enter your M-Pesa PIN         — the long wait; elapsed timer lives
-//                                      on this step.
-//   4. Payment confirmed             — receipt chip appears here.
-// A push rejection (e.g. an existing USSD session) fails at stage 2; a
-// PIN timeout / cancellation / low balance fails at stage 3.
+// Three distinct UI phases (2026-10-31 UX round, owner-approved blueprint):
+//   PROGRESS — a truthful 4-step tracker driven by REAL events:
+//     1. Payment accepted by gateway   — always done once the card shows
+//                                        (respond-first: the row exists).
+//     2. Prompt sent to your phone     — done when the row carries a
+//                                        checkout_request_id (Daraja accepted
+//                                        the push, seen on the next poll).
+//     3. Enter your M-Pesa PIN         — the long wait; a COUNTDOWN lives
+//                                        here (ball is in the user's court)
+//                                        plus a "Didn't get a prompt?" tips
+//                                        toggle.
+//     4. Payment confirmed             — the terminal step; the tracker
+//                                        NEVER advances past stage 3 until
+//                                        the backend holds a real result.
+//   SUCCESS — separate celebration screen (subtle spring checkmark — no
+//     confetti; KES 50 should not feel like a lottery win), receipt number,
+//     amount, paid-at time (EAT), Back to Home. Fired only when the backend
+//     holds ResultCode 0 from the callback or an authoritative query.
+//   FAILED — separate calm card: specific reason by code (1 balance /
+//     1032 cancelled / 1037 no PIN in time / 2001 wrong PIN), reassurance
+//     that nothing was charged, Try Again + Back to Home.
 //
 // Timing: STK prompts regularly take 30-60s+ for the user to key their PIN,
-// so polling runs every 4s for up to ~3.5 minutes, and a little longer after
-// success so the callback's receipt number lands on screen. When we stop
-// auto-checking the payment is left PENDING (never "failed") with a Keep
-// Checking action.
+// so polling runs every 4s for up to ~3.5 minutes (the countdown mirrors
+// this — calibrated to the server's 150s settle window and real prompt
+// lifetimes, longer than the generic "90s" rule), and a little longer after
+// success so the callback's receipt lands. When we stop auto-checking the
+// payment is left PENDING (never "failed") with a Keep Checking action.
 //
-// If the push call itself times out (offline / old gateway / network flap)
-// we ADOPT the most recent pending payment row instead of dead-ending — the
-// row is created server-side before the push, so it almost always exists.
+// Edge cases handled: double-tap (button disabled + starting guard), app
+// closed mid-payment (a mount probe offers to RESUME a recent pending row —
+// the gateway and the M-Pesa SMS keep working either way), duplicate
+// callbacks (backend settlement is idempotent by checkout_request_id), and
+// a timed-out push call (the most recent pending row is ADOPTED instead of
+// dead-ending).
 //
 // Every step of the journey logs a [MPESA] line (start → push → poll ticks →
 // settlement → receipt) so the whole flow can be traced from the console.
@@ -45,15 +59,20 @@ import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 const AMOUNTS = [1, 50, 100, 200, 500];
 const POLL_MS = 4000;
 const MAX_POLLS = 52; // ~3.5 minutes of auto-checking
+const TOTAL_WAIT_S = (MAX_POLLS * POLL_MS) / 1000; // countdown mirror of the polling window
 const RECEIPT_EXTRA_POLLS = 8; // keep polling ~30s after success until the receipt lands
 const ADOPT_WINDOW_MS = 3 * 60 * 1000; // adopt a pending row created within 3 min
+const RESUME_WINDOW_MS = 10 * 60 * 1000; // offer to resume a pending row up to 10 min old
 
-// Daraja result codes -> human sentences (the raw ResultDesc reads like a log).
+// Daraja result codes -> human sentences. Tone: neutral, specific, never
+// alarmist — 1032 (user cancelled) reads very differently from 1 (balance).
+// 1037 = DS timeout: the prompt WAS sent, the PIN just never arrived in
+// time (delivery failures surface earlier, at the push stage).
 const FRIENDLY_FAILURES = {
   1: 'There was not enough M-Pesa balance to complete this payment. Top up and try again.',
-  1032: 'The payment request was cancelled before it was approved.',
-  1037: 'The request expired before a PIN was entered. Send a new push and approve it in time.',
-  2001: 'The PIN entered was not correct. Nothing was charged — please try again.',
+  1032: 'You cancelled the payment before entering your PIN. Nothing was charged — tap below to try again.',
+  1037: 'We did not receive your PIN in time. Send a new push and enter it promptly.',
+  2001: 'The M-Pesa PIN you entered was not correct. Nothing was charged — please try again.',
 };
 
 function friendlyFailure(payment) {
@@ -65,6 +84,23 @@ function friendlyFailure(payment) {
 }
 
 const log = (...a) => console.log('[MPESA]', ...a);
+
+// Deterministic EAT display time (the gateway stores UTC; EAT = UTC+3) —
+// independent of the device timezone.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtEAT(iso) {
+  if (!iso) return '';
+  const d = new Date(String(iso).endsWith('Z') ? iso : `${String(iso).replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  const e = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${e.getUTCDate()} ${MONTHS[e.getUTCMonth()]} ${e.getUTCFullYear()} · ${p(e.getUTCHours())}:${p(e.getUTCMinutes())}`;
+}
+
+const fmtMMSS = (s) => {
+  const v = Math.max(0, Math.round(s));
+  return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`;
+};
 
 // One row of the staged progress tracker. State: done | active | todo | failed.
 // A thin rail connects the icons so the list reads as one journey.
@@ -100,9 +136,11 @@ export default function PaymentScreen({ navigation }) {
   const [phoneError, setPhoneError] = useState('');
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
-  const [payment, setPayment] = useState(null); // { id, status, mpesaReceipt, resultDesc, phone, checkoutRequestId }
+  const [payment, setPayment] = useState(null); // { id, status, mpesaReceipt, resultDesc, phone, checkoutRequestId, updatedAt }
   const [elapsed, setElapsed] = useState(0);
   const [stopped, setStopped] = useState(false); // stopped auto-checking while still pending
+  const [showTips, setShowTips] = useState(false);
+  const [resumable, setResumable] = useState(null); // recent pending row found on mount
   const pollRef = useRef({ timerId: null, n: 0 });
   const busyRef = useRef(false); // a poll tick is in flight — skip overlapping ticks
   const doneRef = useRef(false); // flow ended — swallow any stray queued tick
@@ -125,6 +163,45 @@ export default function PaymentScreen({ navigation }) {
     ],
   };
 
+  // Success celebration: a subtle one-shot spring on the checkmark badge —
+  // calm and brand-true, no confetti.
+  const checkAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (statusKey !== 'success') return;
+    checkAnim.setValue(0);
+    Animated.spring(checkAnim, { toValue: 1, friction: 5, useNativeDriver: true }).start();
+  }, [statusKey, checkAnim]);
+  const checkStyle = {
+    opacity: checkAnim,
+    transform: [{ scale: checkAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
+  };
+
+  // Edge case: the app was closed (or crashed) while a prompt was open. The
+  // gateway kept the row and the callback still settles it — offer to
+  // reattach instead of pretending nothing happened.
+  useEffect(() => {
+    let cancelled = false;
+    if (!token) return undefined;
+    (async () => {
+      try {
+        const list = await api.mpesaList(token);
+        const pend = (list.payments || []).find(
+          (p) =>
+            p.status === 'pending' &&
+            p.createdAt &&
+            Date.now() - new Date(p.createdAt).getTime() < RESUME_WINDOW_MS
+        );
+        if (!cancelled && pend && !payment) setResumable(pend);
+      } catch (e) {
+        // Silent — the resume probe is a convenience, never a blocker.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   const stopTimers = () => {
     doneRef.current = true; // reject any already-queued tick
     if (pollRef.current.timerId) clearInterval(pollRef.current.timerId);
@@ -141,6 +218,7 @@ export default function PaymentScreen({ navigation }) {
     doneRef.current = false; // fresh run — stopTimers marked it done
     busyRef.current = false;
     setElapsed(0);
+    setShowTips(false);
     elapsedRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
     log(`polling started for payment #${paymentId} every ${POLL_MS / 1000}s (max ${MAX_POLLS})`);
     const runTick = async () => {
@@ -259,6 +337,7 @@ export default function PaymentScreen({ navigation }) {
       );
       log(`push accepted by gateway in ${Date.now() - t0}ms — payment #${res.paymentId}${res.queued ? ' (Daraja push running in background)' : ''}`);
       setPayment({ id: res.paymentId, status: 'pending', mpesaReceipt: null, resultDesc: null });
+      setResumable(null);
       startPolling(res.paymentId);
     } catch (e) {
       const code = e && e.code;
@@ -276,6 +355,22 @@ export default function PaymentScreen({ navigation }) {
     }
   };
 
+  const resume = () => {
+    if (!resumable) return;
+    log(`resuming payment #${resumable.id} (KES ${resumable.amount}) — it may have settled while the app was closed`);
+    setPayment({
+      id: resumable.id,
+      status: resumable.status,
+      mpesaReceipt: resumable.mpesaReceipt || null,
+      resultDesc: resumable.resultDesc || null,
+      phone: resumable.phone || null,
+      checkoutRequestId: resumable.checkoutRequestId || null,
+      updatedAt: resumable.updatedAt || null,
+    });
+    setResumable(null);
+    startPolling(resumable.id);
+  };
+
   const reset = () => {
     log('reset — back to the amount form');
     stopTimers();
@@ -288,56 +383,36 @@ export default function PaymentScreen({ navigation }) {
   // The push is accepted once the row carries a checkout_request_id (written
   // by the gateway right after Daraja accepts — visible on the next poll).
   const pushSent = !!(payment && payment.checkoutRequestId);
+  const remaining = Math.max(0, TOTAL_WAIT_S - elapsed);
   // Inside the Profile drawer → hamburger + HomeTab exit; root-stack copy → goBack.
   const inDrawer = typeof navigation.openDrawer === 'function';
 
-  // Staged tracker rows for each card state — every stage maps to a real
+  // Staged tracker rows for the PROGRESS card — every stage maps to a real
   // event (row created / Daraja accepted / PIN / callback settlement).
-  const stageRows = (() => {
-    const accepted = {
+  const stageRows = [
+    {
       title: 'Payment accepted by gateway',
       sub: payment ? `KES ${amount} · payment #${payment.id}` : null,
       state: 'done',
-    };
-    const prompt = (state, sub) => ({
+    },
+    {
       title: 'Prompt sent to your phone',
-      sub: sub !== undefined ? sub : `STK request to ${(payment && payment.phone) || phone}`,
-      state,
-    });
-    const pin = (state, sub) => ({
+      sub: `STK request to ${(payment && payment.phone) || phone}`,
+      state: pushSent ? 'done' : 'active',
+    },
+    {
       title: 'Enter your M-Pesa PIN',
-      sub: sub !== undefined ? sub : `Waiting for confirmation · ${elapsed}s`,
-      state,
-    });
-    const confirmed = (state, sub) => ({
+      sub: pushSent ? `Waiting for your PIN · ${fmtMMSS(remaining)} remaining` : undefined,
+      state: pushSent ? 'active' : 'todo',
+    },
+    {
       title: 'Payment confirmed',
-      sub: sub !== undefined ? sub : 'M-Pesa receipt appears here',
-      state,
-    });
-    if (pending) {
-      return [
-        accepted,
-        prompt(pushSent ? 'done' : 'active'),
-        pin(pushSent ? 'active' : 'todo'),
-        confirmed('todo'),
-      ];
-    }
-    if (payment && payment.status === 'failed') {
-      // No checkout_request_id -> Daraja never accepted the push (stage 2);
-      // otherwise the PIN request itself failed (stage 3).
-      const failedAtPrompt = !pushSent;
-      return [
-        accepted,
-        prompt(failedAtPrompt ? 'failed' : 'done', failedAtPrompt ? 'The prompt could not be sent' : undefined),
-        pin(failedAtPrompt ? 'todo' : 'failed', failedAtPrompt ? undefined : 'The PIN request failed'),
-        confirmed('todo', 'Not reached'),
-      ];
-    }
-    if (payment && payment.status === 'success') {
-      return [accepted, prompt('done'), pin('done', 'PIN approved'), confirmed('done')];
-    }
-    return [];
-  })();
+      sub: 'M-Pesa receipt appears here',
+      state: 'todo',
+    },
+  ];
+
+  const goHome = () => (inDrawer ? navigation.navigate('HomeTab') : navigation.goBack());
 
   return (
     <Screen>
@@ -350,37 +425,49 @@ export default function PaymentScreen({ navigation }) {
 
       <Banner message={error} />
 
+      {resumable && !payment ? (
+        <View style={styles.resumeCard}>
+          <Text style={styles.resumeTitle}>Payment still open</Text>
+          <Text style={styles.resumeBody}>
+            A KES {resumable.amount} payment to {resumable.phone} is still waiting for a PIN. It may
+            have completed while the app was closed.
+          </Text>
+          <View style={styles.resumeActions}>
+            <PrimaryButton title="Resume watching" onPress={resume} style={styles.resumeBtn} />
+            <SecondaryButton title="Dismiss" onPress={() => setResumable(null)} style={styles.resumeBtn} />
+          </View>
+        </View>
+      ) : null}
+
       {payment && payment.status === 'success' ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.brandSoft }, cardStyle]}>
+          <Animated.View style={[styles.successBadge, checkStyle]}>
+            <Ionicons name="checkmark" size={40} color={colors.brand} />
+          </Animated.View>
           <Text style={styles.statusTitle}>Payment received</Text>
-          <View style={styles.steps}>
-            {stageRows.map((s, i) => (
-              <StepRow key={s.title} {...s} last={i === stageRows.length - 1} />
-            ))}
-          </View>
+          <Text style={styles.statusBody}>
+            KES {amount} received via M-Pesa from {(payment.phone || phone).replace(/\s/g, ' ')} —
+            asante! Your payment is confirmed.
+          </Text>
           <View style={styles.receiptChip}>
             <Text style={styles.receiptLabel}>M-Pesa receipt</Text>
             <Text style={styles.receiptValue}>{payment.mpesaReceipt || 'Confirming…'}</Text>
           </View>
-          <PrimaryButton
-            title="Back to Home"
-            onPress={() => (inDrawer ? navigation.navigate('HomeTab') : navigation.goBack())}
-            style={{ marginTop: 18 }}
-          />
+          {payment.updatedAt ? (
+            <Text style={styles.paidLine}>Paid {fmtEAT(payment.updatedAt)} EAT</Text>
+          ) : null}
+          <PrimaryButton title="Back to Home" onPress={goHome} style={{ marginTop: 18 }} />
         </Animated.View>
       ) : payment && payment.status === 'failed' ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.danger }, cardStyle]}>
+          <Ionicons name="close-circle" size={46} color={colors.danger} />
           <Text style={styles.statusTitle}>Payment not completed</Text>
-          <View style={styles.steps}>
-            {stageRows.map((s, i) => (
-              <StepRow key={s.title} {...s} last={i === stageRows.length - 1} />
-            ))}
-          </View>
           <Text style={styles.statusBody}>{friendlyFailure(payment)}</Text>
           <Text style={styles.statusNote}>
             Nothing is charged for unapproved requests. Send a new push whenever you are ready.
           </Text>
-          <PrimaryButton title="Try Again" onPress={reset} style={{ marginTop: 18 }} />
+          <PrimaryButton title="Try Again" onPress={reset} style={{ marginTop: 18, alignSelf: 'stretch' }} />
+          <SecondaryButton title="Back to Home" onPress={goHome} style={{ marginTop: 10, alignSelf: 'stretch' }} />
         </Animated.View>
       ) : payment && pending ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.gold }, cardStyle]}>
@@ -390,10 +477,16 @@ export default function PaymentScreen({ navigation }) {
               <StepRow key={s.title} {...s} last={i === stageRows.length - 1} />
             ))}
           </View>
-          <Text style={styles.statusNote}>
-            The prompt can take a few seconds to reach your phone, and up to a minute on busy
-            networks. You have about 3 minutes to enter your PIN — keep this screen open.
-          </Text>
+          <Pressable onPress={() => setShowTips((v) => !v)} hitSlop={8}>
+            <Text style={styles.tipsLink}>{showTips ? 'Hide tips' : "Didn't get a prompt?"}</Text>
+          </Pressable>
+          {showTips ? (
+            <Text style={styles.tipsBody}>
+              Keep the SIM active with network coverage — the prompt can take up to a minute on
+              busy networks. Make sure the phone shown above is the line you want to pay from. If
+              the countdown ends, the request expires and you can simply send a new push.
+            </Text>
+          ) : null}
           {stopped ? (
             <>
               <Text style={styles.statusStopped}>
@@ -481,9 +574,9 @@ const styles = StyleSheet.create({
     padding: 24,
     marginTop: 8,
   },
-  statusTitle: { fontSize: 19, fontWeight: '800', color: colors.ink, marginBottom: 14 },
+  statusTitle: { fontSize: 19, fontWeight: '800', color: colors.ink, marginTop: 10, marginBottom: 6 },
   statusBody: {
-    marginTop: 12,
+    marginTop: 6,
     fontSize: 14.5,
     lineHeight: 21,
     color: colors.muted,
@@ -504,8 +597,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  // Success celebration.
+  successBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.brandSoftBg,
+    borderWidth: 1.5,
+    borderColor: colors.brandSoft,
+  },
+  paidLine: { marginTop: 10, fontSize: 12, color: colors.muted },
   // Staged progress tracker.
-  steps: { alignSelf: 'stretch' },
+  steps: { alignSelf: 'stretch', marginTop: 6 },
   stepRow: { flexDirection: 'row' },
   stepIconCol: { width: 30, alignItems: 'center' },
   stepRail: { width: 2, flex: 1, backgroundColor: colors.line, borderRadius: 1, marginVertical: 3 },
@@ -514,6 +619,33 @@ const styles = StyleSheet.create({
   stepTitle: { fontSize: 14.5, fontWeight: '700', color: colors.ink, lineHeight: 20 },
   stepTitleTodo: { color: colors.muted, fontWeight: '600' },
   stepSub: { marginTop: 2, fontSize: 12.5, lineHeight: 17, color: colors.muted },
+  tipsLink: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.goldDark,
+    textDecorationLine: 'underline',
+  },
+  tipsBody: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.muted,
+    textAlign: 'center',
+  },
+  // Resume banner (app closed mid-payment).
+  resumeCard: {
+    backgroundColor: colors.goldSoft,
+    borderColor: colors.gold,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: 16,
+    marginTop: 8,
+  },
+  resumeTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  resumeBody: { marginTop: 4, fontSize: 13, lineHeight: 18, color: colors.muted },
+  resumeActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  resumeBtn: { flex: 1 },
   receiptChip: {
     marginTop: 16,
     alignItems: 'center',

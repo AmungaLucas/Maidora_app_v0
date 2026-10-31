@@ -46,6 +46,41 @@ stages. Delivered, plus one reliability fix the trace itself exposed.
   receipt. Latency re-probe after the refactor: responds back to 4–71 ms
   server-side (E2E row #35's one-off 7.8 s respond was a restart-moment
   artifact seconds after `touch restart.txt`, not a regression).
+- **Follow-up (same day) — success/failure screens split from the tracker**
+  (owner brought a UX blueprint from a chat; it validated the built polling
+  + real-event stages and added four things, all client-side, no gateway
+  changes):
+  - **Success is now a dedicated celebration screen** — subtle spring
+    checkmark badge (no confetti — a KES 50 payment must not feel like a
+    lottery win), receipt number, amount + paying phone, **paid-at time in
+    EAT** (deterministic UTC+3 formatting, device-timezone-independent),
+    Back to Home. Fires only when the backend holds ResultCode 0 from the
+    callback or an authoritative query — never on the synchronous
+    ResponseCode 0 (respond-first means the app never even sees that).
+  - **Failure is now a standalone calm card** (no step list) with
+    code-specific copy — 1032 reworded to "You cancelled the payment before
+    entering your PIN…" (neutral, no alarm) and 1037 kept factually
+    accurate ("We did not receive your PIN in time" — the blueprint's
+    "couldn't send the prompt" is wrong for 1037: the prompt *was* sent;
+    real delivery failures surface earlier as push-stage errors) — plus
+    Try Again **and** a Back to Home exit.
+  - **Countdown on the PIN wait** ("Waiting for your PIN · 3:28 remaining")
+    instead of a bare elapsed counter — the ball is visibly in the user's
+    court. Calibrated to the 3.5 min polling window (longer and more
+    accurate than the blueprint's generic 90 s: the server's settle window
+    is 150 s and real prompts live ~2 min).
+  - **"Didn't get a prompt?" tips toggle** in the progress card (SIM
+    coverage, wrong line, expiry → send a new push).
+  - **Resume after app close**: on mount the screen probes the user's
+    recent payments and offers a "Payment still open — Resume watching /
+    Dismiss" banner for any pending row younger than 10 min (the gateway
+    and the M-Pesa SMS keep working either way). Logged as
+    `[MPESA] resuming payment #…`.
+  - Blueprint items already in place (no change needed): polling at 3–5 s
+    (ours 4 s), double-tap guard, idempotent callback settlement by
+    `checkout_request_id`, terminal-before-advance rule (stage 3 never
+    advances without a real result), 1032/1037/2001/1 code-specific
+    failure copy.
 
 ---
 
