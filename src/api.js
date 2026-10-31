@@ -194,8 +194,20 @@ export const api = {
   // ─── Marketplace (unified spec §9/§10/§15.1) ────────────────────────────
   // GET /maids — search + filters (§10 decay applied server-side).
   maids: (params, token) => request(`/maids${qs(params)}`, { token }),
+  // GET /maids/rails — employer-home rails in ONE call (featured/nearby/
+  // verified/topRated; MPS §15.5 placement).
+  maidsRails: (token) => request('/maids/rails', { token }),
   // GET /maids/:id — public profile (no contact details).
   maidProfile: (id, token) => request(`/maids/${id}`, { token }),
+
+  // ─── Boosts (§15.5 entitlements) ─────────────────────────────────────────
+  // GET /boosts/status — banked + active boosts for the signed-in househelp.
+  boostsStatus: (token) => request('/boosts/status', { token }),
+  // POST /boosts/profile — consume one banked profile boost → featured 7d.
+  boostProfile: (token) => request('/boosts/profile', { method: 'POST', body: {}, token }),
+  // POST /boosts/applications/:id — spend one banked boost on an application.
+  boostApplication: (id, token) =>
+    request(`/boosts/applications/${id}`, { method: 'POST', body: {}, token }),
 
   // POST /jobs — employer posts a job (verified gate).
   postJob: (payload, token) => request('/jobs', { method: 'POST', body: payload, token }),

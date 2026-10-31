@@ -1,15 +1,24 @@
 // Maid discovery — search, filters, §10 visibility decay (unified spec).
 //
 //   GET /api/maids        browse + search (requireAuth — read-only scope §15.1)
+//   GET /api/maids/rails  employer-home rails in ONE call: featured (paid
+//                         profile boost §15.5), nearby (caller's county),
+//                         verified (KYC approved), topRated (quality score —
+//                         PROXY until a real ratings feature is specced)
 //   GET /api/maids/:id    public profile of one househelp (no contact details —
 //                         phone/chat only through the verified, gated flows)
 //
 // §10 decay (driven by users.last_active_at):
 //   0–13d  Active   — normal, ranked first
 //   14–29d Quiet    — fully visible, ranked below Active within a tier
-//   30–59d Dormant  — EXCLUDED from default browse; findable only when a
-//                     search term (q) is present, with a label
+//   30–59d Dormant  — EXCLUDED from default browse AND curated rails; findable
+//                     only when a search term (q) is present, with a label
 //   60+    Archived — never in browse/search (threads/applications stay live)
+//
+// §15.5 profile boost (KES 99 / 7 days, "rotating top-of-feed"): a maid with
+// boost active (maid_profiles.boosted_until > NOW()) ranks FIRST in every
+// rail/browse order and carries featured: true — placement is not purchasable
+// any other way (MPS amendment).
 const express = require('express');
 const { pool } = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
@@ -35,8 +44,16 @@ const SELECT_COLUMNS = `
   u.id AS user_id, u.full_name, u.avatar_url, u.location_county, u.location_area,
   u.location_name, u.last_active_at, u.kyc_status, u.created_at,
   mp.date_of_birth, mp.gender, mp.languages, mp.job_type, mp.years_experience,
-  mp.wage_expectation, mp.bio, TIMESTAMPDIFF(DAY, u.last_active_at, NOW()) AS days_idle
+  mp.wage_expectation, mp.bio,
+  mp.boosted_until,
+  (mp.boosted_until IS NOT NULL AND mp.boosted_until > NOW()) AS is_boosted,
+  TIMESTAMPDIFF(DAY, u.last_active_at, NOW()) AS days_idle
 `;
+
+// §15.5 featured placement comes first everywhere; then the §10 tiers.
+const RANK_SQL =
+  'ORDER BY (mp.boosted_until IS NOT NULL AND mp.boosted_until > NOW()) DESC, ' +
+  '(u.last_active_at IS NOT NULL AND u.last_active_at > (NOW() - INTERVAL 14 DAY)) DESC, u.last_active_at DESC';
 
 function shapeMaid(r, { detailed = false } = {}) {
   const age = r.date_of_birth
@@ -63,6 +80,9 @@ function shapeMaid(r, { detailed = false } = {}) {
     lastActiveDays: r.days_idle === null ? null : Number(r.days_idle),
     lastActiveLabel: lastActiveLabel(r.days_idle === null ? null : Number(r.days_idle)),
     memberSince: r.created_at ? String(r.created_at).slice(0, 10) : null,
+    // §15.5 — paid profile boost ("Featured" badge + top-of-feed placement)
+    featured: Number(r.is_boosted) === 1,
+    featuredUntil: r.boosted_until || null,
   };
 }
 
@@ -115,11 +135,14 @@ router.get('/', requireAuth, async (req, res, next) => {
     if (verifiedOnly) {
       where.push("u.kyc_status = 'approved'");
     }
+    if (req.query.featured === '1') {
+      // §15.5 — only maids whose paid profile boost is active right now.
+      where.push('mp.boosted_until IS NOT NULL AND mp.boosted_until > NOW()');
+    }
 
     const whereSql = where.join(' AND ');
-    // §10 ranking: Active maids first, most-recently-active within each tier.
-    const orderSql =
-      'ORDER BY (u.last_active_at IS NOT NULL AND u.last_active_at > (NOW() - INTERVAL 14 DAY)) DESC, u.last_active_at DESC';
+    // §15.5 featured first, then §10 ranking (Active maids, most-recent first).
+    const orderSql = RANK_SQL;
 
     const [[{ total }]] = await pool.query(
       `SELECT COUNT(*) AS total
@@ -159,6 +182,86 @@ router.get('/', requireAuth, async (req, res, next) => {
       total,
       hasMore: page * perPage < total,
       counties,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/maids/rails — the employer-home rails in ONE round trip.
+// Rails (owner request 2026-11-01, MPS §15.5 placement):
+//   featured  — paid profile boost active (maid_profiles.boosted_until > NOW())
+//   nearby    — maids in the CALLER's county (falls back to nationwide when
+//               the caller has no county or nobody matches — flagged)
+//   verified  — Trust Badge only (kyc_status = 'approved')
+//   topRated  — PROXY quality score until a real ratings feature exists:
+//               trust badge 40 · years of experience up to 30 (2/yr, cap 15)
+//               · §7 profile fields present up to 20 · active ≤3d 10.
+//               Documented as a proxy — never silently assumed to be "real"
+//               ratings (no reviews table exists anywhere in the specs).
+// Every rail applies the §10 gates (active accounts, dormant/archived out).
+router.get('/rails', requireAuth, async (req, res, next) => {
+  try {
+    const perRail = Math.min(8, Math.max(1, parseInt(req.query.per_rail, 10) || 6));
+    // §10 base gates — identical to browse (rails are curated browse).
+    const baseWhere = [
+      "u.role = 'househelp'",
+      "u.account_status = 'active'",
+      '(u.last_active_at IS NULL OR u.last_active_at > (NOW() - INTERVAL 30 DAY))',
+    ];
+    const baseSql = `FROM users u LEFT JOIN maid_profiles mp ON mp.user_id = u.id WHERE ${baseWhere.join(' AND ')}`;
+
+    async function rail(where, order, params = []) {
+      const [rows] = await pool.query(
+        `SELECT ${SELECT_COLUMNS} ${baseSql}${where ? ` AND ${where}` : ''} ${order} LIMIT ${perRail}`,
+        params
+      );
+      return rows.map((r) => shapeMaid(r));
+    }
+
+    // 1. FEATURED — the paid placement rail.
+    const featured = await rail(
+      'mp.boosted_until IS NOT NULL AND mp.boosted_until > NOW()',
+      'ORDER BY mp.boosted_until DESC, u.last_active_at DESC'
+    );
+
+    // 2. NEAR ME — caller's county first; nationwide fallback when empty.
+    const [[me]] = await pool.query('SELECT location_county FROM users WHERE id = ?', [req.user.uid]);
+    let nearby = [];
+    let nearbyCounty = me?.location_county || null;
+    let nearbyFallback = false;
+    if (nearbyCounty) {
+      nearby = await rail('u.location_county = ?', RANK_SQL, [nearbyCounty]);
+    }
+    if (!nearby.length) {
+      nearbyFallback = true;
+      nearbyCounty = null;
+      nearby = await rail('', RANK_SQL);
+    }
+
+    // 3. VERIFIED — Trust Badge holders.
+    const verified = await rail("u.kyc_status = 'approved'", RANK_SQL);
+
+    // 4. TOP RATED — quality-score proxy (see docblock).
+    const topRated = await rail(
+      '',
+      `ORDER BY (
+         (u.kyc_status = 'approved') * 40
+         + LEAST(COALESCE(mp.years_experience, 0), 15) * 2
+         + ((mp.bio IS NOT NULL AND mp.bio != '') + (mp.languages IS NOT NULL AND mp.languages != '[]')
+            + (mp.wage_expectation IS NOT NULL) + (mp.job_type IS NOT NULL)
+            + (mp.date_of_birth IS NOT NULL)) * 4
+         + (u.last_active_at IS NOT NULL AND u.last_active_at > (NOW() - INTERVAL 3 DAY)) * 10
+       ) DESC, u.last_active_at DESC`
+    );
+
+    res.json({
+      featured,
+      nearby,
+      nearbyCounty,
+      nearbyFallback,
+      verified,
+      topRated,
     });
   } catch (e) {
     next(e);

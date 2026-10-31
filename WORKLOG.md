@@ -66,6 +66,75 @@ navigator). api.js grew the client methods. @babel parse 13/13.
 
 ---
 
+## 2026-11-01 — §15.5 BOOSTS SHIP (profile + application) · employer-home rails (owner's section list) · chat FlatList crash fix (deployed, E2E 26/26)
+
+Owner: "Property 'FlatList' doesn't exist navigating to chat · employer home =
+maids near me, verified, top rated, featured (profile-boost paid) per docs ·
+boosted application at the top of the application list, per docs."
+
+**Chat crash (owner-reported, crash class).** `ChatThreadScreen` rendered
+`<FlatList>` without importing it — Hermes: `ReferenceError: Property 'FlatList'
+doesn't exist` the moment a conversation opened. Import added; a repo-wide
+JSX-identifier scan (`scripts/check_missing_imports.js`) found no other missing
+import anywhere (all remaining flags are member-expression tails / hoisted
+exports — verified by hand). Lesson: `[[`-sequences in shell output get
+visually collapsed in this console — trust `node --check` + char-code dumps
+over a rendered diff line (a suspected `const [e]]` "syntax error" in maids.js
+turned out to be `const [[me]]`, byte-verified).
+
+**Backend v9 (deployed, probes 26/26 — `scripts/deploy_boosts_v9.py`).**
+`sql/migrate_v9_boosts.js` (idempotent, schema.sql synced): `maid_profiles.boosted_until`
+(+idx), `job_applications.boosted_at` (+idx), `payments.consumed_at` (+entitlement
+idx) — **a paid payment row IS the entitlement**, `consumed_at` marks it spent so
+it can never replay. The migration also lands the §15.5 FINAL pricing:
+profile_boost 100→**99**, application_boost 50→**30** + `is_active=1` — guarded
+UPDATEs that only touch rows still carrying the v5 provisional values (an
+owner-edited price is never stomped). New route `src/routes/boosts.js`:
+`GET /boosts/status` (banked counts + featured window) · `POST /boosts/profile`
+(consume one banked row → `boosted_until = GREATEST(current, NOW()) + 7d`,
+stacking) · `POST /boosts/applications/:id` (spend one banked row on MY pending
+application; 409 `already_boosted`, 402 `paywall_required` → app routes to
+M-Pesa preselected). Consumption is atomic (`UPDATE … WHERE consumed_at IS NULL`)
+— a double-tap can never spend a row twice. `maids.js`: `/rails` — the
+employer-home sections in ONE call: **featured** (active boost), **nearby**
+(caller's county, nationwide fallback flagged), **verified** (Trust Badge),
+**topRated** (quality-score proxy: badge 40 + experience ≤30 + §7 depth ≤20 +
+fresh-active 10 — documented as a proxy, no reviews table exists in any spec);
+§10 decay gates apply; browse gains `featured=1` and boosted-first ranking
+everywhere via `RANK_SQL`. Ordering: BOTH application lists now pin boosted to
+the top — `applications.js` (maid's own list) and **`jobs.js` GET /:id** (the
+employer's applicant list, which had been missed in the first slice — caught by
+the E2E probe "boosted pinned FIRST", then fixed + re-proven). `app.js` mounts
+`/api/boosts` (requireVerified on the spend paths).
+
+**Seed boost state (`seed_demo.js` re-run).** 3 maids with an active 7-day
+profile boost (Mary · Esther · Beatrice — the Featured rail has real people),
+Grace's pending application to James Kamau boosted AND backdated 30h (so the
+employer-list probe is decisive: boosted-first beats a newer applicant), and 2
+banked demo entitlements for Grace (application_boost 30 + profile_boost 99,
+receipts DEMOBOOST01/02) so the Boost button and activation path demo without
+an M-Pesa prompt. E2E left Grace's own profile boost ACTIVATED (featured until
+2026-11-07) — re-running the seed resets the whole demo state.
+
+**App screens (8 files).** `HomeScreen` employer hub rebuilt on the owner's
+section list — Featured maids ("Boosted placement — the top spot, bought
+fairly") · Maids near me (county subtitle, honest nationwide-fallback line) ·
+Verified maids · Top rated maids — four rails, one `/maids/rails` call, each
+hidden when empty; househelp hub gains the §15.5 boost strip ("You are featured
+until …" / "Activate my boost" when banked / "Boost my profile" → Payment
+preselected). `ApplicationsScreen`: Boosted chip, per-application **Boost**
+button (spends a banked boost; 402 → Payment `application_boost`), banked count
+in the credits card. `JobDetailScreen` (owner): Boosted chip on applicants +
+"boosted sit at the top" note. `cards.js`: `FeaturedChip` (gold star on boosted
+maids, browse + rails) and `BoostChip`. `MaidsScreen`: star toggle =
+Featured-only filter (`?featured=1`). `PaymentScreen`: `route.params.purpose`
+deep-link (Home/Application boost CTAs land preselected) + §15.5 fallback
+prices. `api.js`: `maidsRails`, `boostsStatus`, `boostProfile`,
+`boostApplication`. @babel parse 8/8 · missing-import scan clean · backend
+`node --check` 7/7 on the box.
+
+---
+
 ## 2026-11-01 — M-Pesa "fetch failed" root-caused + fixed: cause surfacing + one connect-retry (deployed, E2E 7/7)
 
 Owner's field logs (same session that confirmed resetRoot): KYC submitted clean,

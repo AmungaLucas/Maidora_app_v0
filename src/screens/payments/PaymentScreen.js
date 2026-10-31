@@ -75,12 +75,13 @@ const RESUME_WINDOW_MS = 10 * 60 * 1000; // offer to resume a pending row up to 
 // the `payment_purposes` DB table fetched via GET /payments/purposes, so the
 // owner can change prices/labels without an app release. `amount: null` =
 // user picks from AMOUNTS; a number = fixed price and the amount chips hide.
-// Plan/boost prices remain PROVISIONAL until the products ship (§10) — only
-// kyc_urgent's KES 150 is owner-confirmed. Entitlements land with §10.
+// §15.5 FINAL prices mirrored in the offline fallback (profile boost 99 ·
+// application boost 30); the live pricing table replaces them on load.
 const DEFAULT_PRODUCTS = [
   { key: 'app_test', label: 'STK push test', amount: null },
   { key: 'kyc_urgent', label: 'KYC expedite', amount: 150 },
-  { key: 'profile_boost', label: 'Profile boost', amount: 100 },
+  { key: 'profile_boost', label: 'Profile boost', amount: 99 },
+  { key: 'application_boost', label: 'Application boost', amount: 30 },
   { key: 'maid_basic', label: 'Maid Basic', amount: 200 },
   { key: 'maid_gold', label: 'Maid Gold', amount: 500 },
   { key: 'employer_gold', label: 'Employer Gold', amount: 500 },
@@ -161,10 +162,14 @@ function StepRow({ state, title, sub, last }) {
   );
 }
 
-export default function PaymentScreen({ navigation }) {
+export default function PaymentScreen({ navigation, route }) {
   const { user, token } = useApp();
   const [amount, setAmount] = useState(1);
-  const [purpose, setPurpose] = useState('app_test'); // key into products
+  // Deep-linked purpose (§15.5): HomeScreen "Boost my profile" and the
+  // ApplicationsScreen paywall both land here preselected on a boost.
+  // The key is validated against the loaded catalog — unknown keys simply
+  // fall back to products[0] everywhere `product` is resolved.
+  const [purpose, setPurpose] = useState(route.params?.purpose || 'app_test'); // key into products
   const [products, setProducts] = useState(DEFAULT_PRODUCTS); // live catalog replaces the fallback
   const [phone, setPhone] = useState(user?.phone || '');
   const [phoneError, setPhoneError] = useState('');

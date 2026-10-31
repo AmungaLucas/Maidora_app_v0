@@ -19,6 +19,7 @@ const maidsRoutes = require('./src/routes/maids');
 const jobsRoutes = require('./src/routes/jobs');
 const chatRoutes = require('./src/routes/chat');
 const applicationsRoutes = require('./src/routes/applications');
+const boostsRoutes = require('./src/routes/boosts');
 
 const app = express();
 
@@ -54,6 +55,9 @@ app.use('/api/maids', maidsRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/applications', applicationsRoutes);
 app.use('/api/chat', chatRoutes);
+// Boosts (§15.5): profile boost → featured placement; application boost →
+// top of the employer's applicant list. Entitlements = paid payment rows.
+app.use('/api/boosts', boostsRoutes);
 
 // 404
 app.use((req, res) => {

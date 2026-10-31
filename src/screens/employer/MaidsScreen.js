@@ -31,6 +31,7 @@ export default function MaidsScreen({ navigation }) {
   const [county, setCounty] = useState('');
   const [jobType, setJobType] = useState('');
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [featuredOnly, setFeaturedOnly] = useState(false);
   const [counties, setCounties] = useState([]);
   const [maids, setMaids] = useState([]);
   const [total, setTotal] = useState(0);
@@ -47,7 +48,7 @@ export default function MaidsScreen({ navigation }) {
     try {
       const targetPage = reset ? 1 : page + 1;
       const res = await api.maids(
-        { q, county, job_type: jobType, verified: verifiedOnly ? '1' : '', page: targetPage, per_page: 10 },
+        { q, county, job_type: jobType, verified: verifiedOnly ? '1' : '', featured: featuredOnly ? '1' : '', page: targetPage, per_page: 10 },
         token
       );
       setMaids((prev) => (reset ? res.maids : [...prev, ...res.maids]));
@@ -69,10 +70,10 @@ export default function MaidsScreen({ navigation }) {
     useCallback(() => {
       load({ reset: true });
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [token, county, jobType, verifiedOnly])
+    }, [token, county, jobType, verifiedOnly, featuredOnly])
   );
 
-  const onSearch = useCallback(() => load({ reset: true }), [q, county, jobType, verifiedOnly]);
+  const onSearch = useCallback(() => load({ reset: true }), [q, county, jobType, verifiedOnly, featuredOnly]);
 
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
@@ -101,6 +102,13 @@ export default function MaidsScreen({ navigation }) {
             </Pressable>
           ) : null}
         </View>
+        <Pressable
+          onPress={() => setFeaturedOnly((v) => !v)}
+          style={[styles.starToggle, featuredOnly && styles.starOn]}
+          accessibilityLabel="Featured only"
+        >
+          <Ionicons name="star" size={15} color={featuredOnly ? colors.cream : colors.goldDark} />
+        </Pressable>
         <Pressable
           onPress={() => setVerifiedOnly((v) => !v)}
           style={[styles.verifiedToggle, verifiedOnly && styles.verifiedOn]}
@@ -180,6 +188,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.gold,
   },
+  starToggle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.gold,
+  },
+  starOn: { backgroundColor: colors.goldDark, borderColor: colors.goldDark },
   verifiedOn: { backgroundColor: colors.goldDark, borderColor: colors.goldDark },
   chipScroll: { paddingVertical: 12, paddingRight: 24 },
   center: { paddingVertical: 40, alignItems: 'center' },

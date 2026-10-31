@@ -70,6 +70,29 @@ export function TrustBadge({ compact = false }) {
   );
 }
 
+// Featured chip (§15.5 — paid profile boost, KES 99/7d): gold star pill on
+// cards + rails. Only ever rendered for maids with an ACTIVE boost window
+// (the server computes `featured` from boosted_until > NOW()).
+export function FeaturedChip({ compact = false }) {
+  return (
+    <View style={[styles.featuredChip, compact && { paddingVertical: 2, paddingHorizontal: 7, gap: 3 }]}>
+      <Ionicons name="star" size={compact ? 11 : 13} color={colors.brandDark} />
+      <Text style={[styles.featuredText, compact && { fontSize: 10 }]}>Featured</Text>
+    </View>
+  );
+}
+
+// Boosted chip (§15.5 — application boost, KES 30): marks an application the
+// maid paid to pin to the top of the household's list.
+export function BoostChip() {
+  return (
+    <View style={styles.boostChip}>
+      <Ionicons name="rocket" size={11} color={colors.brandDark} />
+      <Text style={styles.boostText}>Boosted</Text>
+    </View>
+  );
+}
+
 // ─── Chips — horizontal filter row ───────────────────────────────────────────
 export function ChipRow({ options, value, onChange, allLabel = 'All' }) {
   return (
@@ -118,6 +141,7 @@ export function MaidCard({ maid, onPress }) {
         <View style={styles.cardTitleRow}>
           <Text style={styles.cardTitle} numberOfLines={1}>{maid.fullName}</Text>
           {maid.trustBadge ? <TrustBadge compact /> : null}
+          {maid.featured ? <FeaturedChip compact /> : null}
         </View>
         <Text style={styles.cardSub} numberOfLines={1}>
           {[maid.locationArea, maid.locationCounty].filter(Boolean).join(', ') || 'Kenya'}
@@ -199,6 +223,26 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   badgeText: { fontSize: 11, fontWeight: '800', color: colors.goldDark },
+  featuredChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.gold,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  featuredText: { fontSize: 11, fontWeight: '800', color: colors.brandDark },
+  boostChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.brandSoftBg,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  boostText: { fontSize: 11, fontWeight: '800', color: colors.brandDark },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     borderRadius: radius.pill,

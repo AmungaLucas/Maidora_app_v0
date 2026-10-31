@@ -14,6 +14,7 @@ import { Banner, BottomSheetModal, PrimaryButton, Screen, SecondaryButton } from
 import {
   APPLICATION_STATUS,
   Avatar,
+  BoostChip,
   StatusChip,
   TrustBadge,
   formatKes,
@@ -210,6 +211,11 @@ export default function JobDetailScreen({ route, navigation }) {
         <View>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Applicants {applications?.length ? `(${applications.length})` : ''}</Text>
+            {applications?.some((a) => a.boosted) ? (
+              <Text style={styles.boostNote}>
+                Applications boosted with KES 30 sit at the top of this list.
+              </Text>
+            ) : null}
           </View>
           {applications && applications.length === 0 ? (
             <Text style={styles.emptyApps}>
@@ -226,9 +232,10 @@ export default function JobDetailScreen({ route, navigation }) {
                 >
                   <Avatar url={a.maid.avatarUrl} name={a.maid.fullName} size={44} />
                   <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <Text style={styles.appName} numberOfLines={1}>{a.maid.fullName}</Text>
                       {a.maid.trustBadge ? <TrustBadge compact /> : null}
+                      {a.boosted ? <BoostChip /> : null}
                     </View>
                     <Text style={styles.appMeta} numberOfLines={1}>
                       {[
@@ -336,6 +343,12 @@ const styles = StyleSheet.create({
   mineBody: { marginTop: 6, fontSize: 13, lineHeight: 19, color: colors.muted },
   applyHint: { marginTop: 8, fontSize: 12, color: colors.muted, textAlign: 'center' },
   emptyApps: { fontSize: 13.5, color: colors.muted, lineHeight: 20 },
+  boostNote: {
+    marginTop: -4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.brandDark,
+  },
   appCard: {
     backgroundColor: colors.card,
     borderRadius: radius.md,

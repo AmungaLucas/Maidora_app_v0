@@ -1,19 +1,30 @@
 // Applications (Househelp tab) — my applications with live status, §9 credits
-// left, withdraw for pending ones, and quick access to the job.
+// left, withdraw for pending ones, quick access to the job — and the §15.5
+// APPLICATION BOOST (KES 30): a boosted application carries a Boosted chip and
+// pins to the TOP of the household's applicant list (server-ordered). Boosts
+// you've paid for are banked (payments.consumed_at IS NULL) and spent here
+// with one tap; when nothing is banked the button routes to M-Pesa checkout.
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { EmptyState, Screen, ScreenHeader } from '../../ui';
-import { APPLICATION_STATUS, StatusChip, formatKes, timeAgo } from '../../components/market/cards';
+import {
+  APPLICATION_STATUS,
+  BoostChip,
+  StatusChip,
+  formatKes,
+  timeAgo,
+} from '../../components/market/cards';
 
 export default function ApplicationsScreen({ navigation }) {
   const { token } = useApp();
   const [apps, setApps] = useState([]);
   const [creditsLeft, setCreditsLeft] = useState(null);
+  const [boostsBanked, setBoostsBanked] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -26,6 +37,7 @@ export default function ApplicationsScreen({ navigation }) {
       const res = await api.applications(token);
       setApps(res.applications || []);
       setCreditsLeft(res.creditsLeft);
+      setBoostsBanked(Number(res.applicationBoostsBanked) || 0);
     } catch (e) {
       setError(e?.message || 'Could not load your applications.');
     } finally {
@@ -51,6 +63,26 @@ export default function ApplicationsScreen({ navigation }) {
     }
   }
 
+  // §15.5 — spend one BANKED application boost on this pending application.
+  // 402 paywall_required → M-Pesa checkout preselected on application_boost.
+  async function boost(a) {
+    if (busyId === a.id) return;
+    setBusyId(a.id);
+    try {
+      const res = await api.boostApplication(a.id, token);
+      Alert.alert('Application boosted', res?.message || 'It now sits at the top of the list.');
+      await load();
+    } catch (e) {
+      if (e?.status === 402 || e?.code === 'paywall_required') {
+        navigation.navigate('Payment', { purpose: 'application_boost' });
+      } else {
+        Alert.alert('Boost', e?.message || 'Could not boost this application.');
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
       <ScreenHeader
@@ -64,7 +96,8 @@ export default function ApplicationsScreen({ navigation }) {
           <Ionicons name="gift-outline" size={18} color={colors.goldDark} />
           <Text style={styles.creditsText}>
             <Text style={styles.creditsNum}>{creditsLeft}</Text> of 2 free applications left
-            {creditsLeft === 0 ? ' — top-up via M-Pesa lands with the next release.' : ''}
+            {boostsBanked > 0 ? ` · ${boostsBanked} application boost${boostsBanked === 1 ? '' : 's'} banked` : ''}
+            {creditsLeft === 0 && boostsBanked === 0 ? ' — top-up via M-Pesa lands with the next release.' : ''}
           </Text>
         </View>
       ) : null}
@@ -98,8 +131,9 @@ export default function ApplicationsScreen({ navigation }) {
                   {[a.job.employer?.fullName, [a.job.area, a.job.county].filter(Boolean).join(', ')]
                     .filter(Boolean).join(' · ')}
                 </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                   <StatusChip status={a.status} />
+                  {a.boosted ? <BoostChip /> : null}
                   <Text style={styles.meta}>
                     {[
                       a.job.jobTypeLabel,
@@ -109,7 +143,21 @@ export default function ApplicationsScreen({ navigation }) {
                   </Text>
                 </View>
               </View>
-              {a.status === 'pending' ? (
+              {a.status === 'pending' && !a.boosted && boostsBanked > 0 ? (
+                <Pressable
+                  onPress={() => boost(a)}
+                  disabled={busyId === a.id}
+                  hitSlop={8}
+                  style={styles.boostBtn}
+                >
+                  {busyId === a.id ? (
+                    <ActivityIndicator size="small" color={colors.brandDark} />
+                  ) : (
+                    <Ionicons name="rocket-outline" size={14} color={colors.brandDark} />
+                  )}
+                  <Text style={styles.boostText}>Boost</Text>
+                </Pressable>
+              ) : a.status === 'pending' ? (
                 <Pressable
                   onPress={() => withdraw(a.id)}
                   disabled={busyId === a.id}
@@ -173,4 +221,16 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   withdrawText: { fontSize: 11.5, fontWeight: '800', color: colors.muted },
+  boostBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.goldDark,
+    backgroundColor: colors.goldSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  boostText: { fontSize: 11.5, fontWeight: '800', color: colors.brandDark },
 });

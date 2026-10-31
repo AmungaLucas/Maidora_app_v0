@@ -9,12 +9,15 @@
 //     the moment kycStatus becomes 'approved' the banner is gone (and the
 //     Trust Badge shows up in listings everywhere).
 //
-// Content per role (unified spec): profile-completeness banner (§7) first,
-// KYC banner (§8, hidden once approved), then live marketplace content —
-// employer: quick actions + open jobs + new maids; househelp: find-jobs CTA +
-// application credits (§9) + latest jobs.
+// Employer hub — the owner's section list (2026-11-01, "refer to the docs"):
+//   FEATURED (§15.5 paid profile boost, KES 99/7d — placement is not
+//   purchasable any other way) · MAIDS NEAR ME (caller's county) · VERIFIED
+//   MAIDS (Trust Badge, §8) · TOP RATED (server quality-score proxy) — all
+//   four arrive in ONE /maids/rails call; §10 decay gates apply server-side.
+// Househelp hub: find-jobs CTA + §9 credits + boost strip (§15.5: featured
+// status / activate a banked boost / buy one via M-Pesa) + latest jobs.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useApp } from '../../context/AppContext';
@@ -26,6 +29,11 @@ import { REASON_LABELS } from '../verification/kycShared';
 
 function firstName(fullName) {
   return String(fullName || '').trim().split(/\s+/)[0] || 'there';
+}
+
+function dayLabel(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
 }
 
 function kycBannerTitle(user) {
@@ -71,7 +79,12 @@ export default function HomeScreen({ navigation }) {
   });
 
   // Live hub data (previews + counters) — silent on failure.
-  const [hub, setHub] = useState({ jobs: [], maids: [], openJobs: 0, applicants: 0, creditsLeft: null, unread: 0 });
+  const [hub, setHub] = useState({ jobs: [], openJobs: 0, applicants: 0, creditsLeft: null, unread: 0 });
+  // Employer: the four discovery rails (featured / nearby / verified / topRated).
+  const [rails, setRails] = useState(null);
+  // Househelp: §15.5 boost strip (featured window + banked entitlements).
+  const [boosts, setBoosts] = useState(null);
+  const [boostBusy, setBoostBusy] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -107,9 +120,9 @@ export default function HomeScreen({ navigation }) {
         // 2. Hub content per role.
         try {
           if (isEmployer) {
-            const [jobsRes, maidsRes] = await Promise.all([
+            const [jobsRes, railsRes] = await Promise.all([
               api.myJobs(token).catch(() => null),
-              api.maids({ per_page: 3 }, token).catch(() => null),
+              api.maidsRails(token).catch(() => null),
             ]);
             if (cancelled) return;
             const jobs = jobsRes?.jobs || [];
@@ -118,12 +131,13 @@ export default function HomeScreen({ navigation }) {
               jobs: jobs.slice(0, 2),
               openJobs: jobs.filter((j) => j.status === 'open').length,
               applicants: jobs.reduce((n, j) => n + (j.applicantCount || 0), 0),
-              maids: maidsRes?.maids || [],
             }));
+            if (railsRes) setRails(railsRes);
           } else {
-            const [jobsRes, appsRes] = await Promise.all([
+            const [jobsRes, appsRes, boostRes] = await Promise.all([
               api.jobs({ per_page: 2 }, token).catch(() => null),
               api.applications(token).catch(() => null),
+              api.boostsStatus(token).catch(() => null),
             ]);
             if (cancelled) return;
             setHub((h) => ({
@@ -132,6 +146,7 @@ export default function HomeScreen({ navigation }) {
               totalJobs: jobsRes?.total || 0,
               creditsLeft: appsRes?.creditsLeft ?? null,
             }));
+            if (boostRes) setBoosts(boostRes);
           }
         } catch {
           // previews are best-effort
@@ -147,6 +162,37 @@ export default function HomeScreen({ navigation }) {
   const showCompletenessBanner =
     completeness && (completeness.done < completeness.total || completeness.total === 0);
   const kycApproved = user?.kycStatus === 'approved';
+
+  // §15.5 — activate a banked profile boost (payment already made): extends
+  // the featured window by 7 days. Errors surface inline via window.alert.
+  async function activateBoost() {
+    if (boostBusy) return;
+    setBoostBusy(true);
+    try {
+      await api.boostProfile(token);
+      const fresh = await api.boostsStatus(token).catch(() => null);
+      if (fresh) setBoosts(fresh);
+    } catch (e) {
+      Alert.alert('Boost', e?.message || 'Could not activate the boost.');
+    } finally {
+      setBoostBusy(false);
+    }
+  }
+
+  // A discovery rail: title + See all + up to four maid cards. Hidden when
+  // the server returned nothing for it (empty featured rail ≠ broken home).
+  function Rail({ title, subtitle, maids }) {
+    if (!maids?.length) return null;
+    return (
+      <>
+        <SectionTitle title={title} actionLabel="See all" onAction={() => navigation.navigate('MaidsTab')} />
+        {subtitle ? <Text style={styles.railSub}>{subtitle}</Text> : null}
+        {maids.slice(0, 4).map((m) => (
+          <MaidCard key={m.id} maid={m} onPress={() => navigation.navigate('MaidProfile', { maidId: m.id })} />
+        ))}
+      </>
+    );
+  }
 
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
@@ -213,14 +259,38 @@ export default function HomeScreen({ navigation }) {
             </>
           ) : null}
 
-          {hub.maids.length ? (
+          {rails === null ? (
+            <View style={styles.railsLoading}>
+              <ActivityIndicator color={colors.brand} size="small" />
+            </View>
+          ) : (
             <>
-              <SectionTitle title="Maids near you" actionLabel="See all" onAction={() => navigation.navigate('MaidsTab')} />
-              {hub.maids.map((m) => (
-                <MaidCard key={m.id} maid={m} onPress={() => navigation.navigate('MaidProfile', { maidId: m.id })} />
-              ))}
+              {/* §15.5 FEATURED — the paid-placement rail (KES 99 / 7 days). */}
+              <Rail
+                title="Featured maids"
+                subtitle="Boosted placement — the top spot, bought fairly."
+                maids={rails?.featured}
+              />
+              {/* MAIDS NEAR ME — the caller's county; nationwide fallback is
+                  flagged so the heading never lies about "near". */}
+              <Rail
+                title="Maids near me"
+                subtitle={
+                  rails?.nearbyFallback
+                    ? 'No matches in your county yet — showing active profiles nationwide.'
+                    : rails?.nearbyCounty
+                    ? `Active in ${rails.nearbyCounty}`
+                    : null
+                }
+                maids={rails?.nearby}
+              />
+              {/* VERIFIED — Trust Badge holders (§8). */}
+              <Rail title="Verified maids" maids={rails?.verified} />
+              {/* TOP RATED — server quality score (badge, experience, profile
+                  depth, recency) until a real ratings feature exists. */}
+              <Rail title="Top rated maids" maids={rails?.topRated} />
             </>
-          ) : null}
+          )}
         </>
       ) : (
         /* ── Househelp hub ──────────────────────────────────────────────── */
@@ -251,6 +321,50 @@ export default function HomeScreen({ navigation }) {
                 </Text>
               </View>
             </View>
+          ) : null}
+
+          {/* §15.5 boost strip — featured now · activate a banked boost · buy one. */}
+          {boosts ? (
+            boosts.profileBoostActive ? (
+              <View style={[styles.creditsCard, styles.boostActiveCard]}>
+                <Ionicons name="star" size={20} color={colors.brandDark} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.creditsTitle}>You are featured</Text>
+                  <Text style={[styles.creditsBody, { color: colors.brandDark, fontWeight: '600' }]}>
+                    Your profile sits at the top until {dayLabel(boosts.profileBoostedUntil)}.
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.creditsCard}>
+                <Ionicons name="trending-up-outline" size={20} color={colors.goldDark} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.creditsTitle}>Get featured</Text>
+                  <Text style={styles.creditsBody}>
+                    {boosts.profileBoostsBanked > 0
+                      ? `You have ${boosts.profileBoostsBanked} boost${boosts.profileBoostsBanked === 1 ? '' : 's'} paid and ready — go top of the list for 7 days.`
+                      : 'Top of search, home rails and feeds for 7 days — KES 99 via M-Pesa.'}
+                  </Text>
+                  {boosts.profileBoostsBanked > 0 ? (
+                    <Pressable onPress={activateBoost} disabled={boostBusy} style={styles.boostActivate} hitSlop={4}>
+                      {boostBusy ? (
+                        <ActivityIndicator size="small" color={colors.goldDark} />
+                      ) : (
+                        <Text style={styles.boostActivateText}>Activate my boost</Text>
+                      )}
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      onPress={() => navigation.navigate('Payment', { purpose: 'profile_boost' })}
+                      style={styles.boostActivate}
+                      hitSlop={4}
+                    >
+                      <Text style={styles.boostActivateText}>Boost my profile</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            )
           ) : null}
 
           {hub.jobs.length ? (
@@ -394,6 +508,24 @@ const styles = StyleSheet.create({
   creditsNum: { fontSize: 18, fontWeight: '800', color: colors.goldDark },
   creditsTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink },
   creditsBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
+  boostActiveCard: { backgroundColor: colors.gold },
+  boostActivate: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.goldDark,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  boostActivateText: { fontSize: 12.5, fontWeight: '800', color: colors.goldDark },
+  railSub: {
+    marginTop: -4,
+    marginBottom: 10,
+    fontSize: 12,
+    color: colors.muted,
+  },
+  railsLoading: { alignItems: 'center', paddingVertical: 22 },
   completenessCard: {
     flexDirection: 'row',
     alignItems: 'center',

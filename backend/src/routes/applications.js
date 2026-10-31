@@ -20,19 +20,26 @@ router.get('/', requireAuth, async (req, res, next) => {
   try {
     if (req.user.role === 'househelp') {
       const [rows] = await pool.query(
-        `SELECT a.id, a.status, a.message, a.created_at, a.job_id,
+        `SELECT a.id, a.status, a.message, a.created_at, a.job_id, a.boosted_at,
                 j.title, j.job_type, j.county, j.area, j.salary_amount, j.status AS job_status,
                 u.full_name AS employer_name, u.avatar_url AS employer_avatar, u.kyc_status AS employer_kyc, u.id AS employer_id
          FROM job_applications a
          JOIN jobs j ON j.id = a.job_id
          JOIN users u ON u.id = j.employer_id
          WHERE a.maid_id = ?
-         ORDER BY a.created_at DESC
+         ORDER BY (a.boosted_at IS NOT NULL) DESC, a.boosted_at DESC, a.created_at DESC
          LIMIT 100`,
         [req.user.uid]
       );
       const [[{ used }]] = await pool.query(
         'SELECT COUNT(*) AS used FROM job_applications WHERE maid_id = ?',
+        [req.user.uid]
+      );
+      // §15.5 — banked (paid, unconsumed) application boosts the maid can
+      // spend from this screen; the app shows the Boost button only when > 0.
+      const [[{ banked }]] = await pool.query(
+        `SELECT COUNT(*) AS banked FROM payments
+         WHERE user_id = ? AND purpose = 'application_boost' AND status = 'success' AND consumed_at IS NULL`,
         [req.user.uid]
       );
       const applications = rows.map((r) => ({
@@ -41,6 +48,10 @@ router.get('/', requireAuth, async (req, res, next) => {
         message: r.message || null,
         createdAt: r.created_at,
         creditsLeftAfter: null,
+        // §15.5 — application boost (KES 30): this application is pinned to
+        // the top of the employer's list.
+        boosted: !!r.boosted_at,
+        boostedAt: r.boosted_at || null,
         job: {
           id: Number(r.job_id),
           title: r.title,
@@ -62,11 +73,14 @@ router.get('/', requireAuth, async (req, res, next) => {
         applications,
         creditsLeft: Math.max(0, WELCOME_FREE_APPLICATIONS - Number(used)),
         freeTotal: WELCOME_FREE_APPLICATIONS,
+        applicationBoostsBanked: Number(banked),
       });
     }
     if (req.user.role === 'employer') {
+      // §15.5 — BOOSTED applications pin to the TOP of the owner's list
+//       (boosted_at DESC), then the usual newest-first order.
       const [rows] = await pool.query(
-        `SELECT a.id, a.status, a.message, a.created_at, a.job_id, a.maid_id,
+        `SELECT a.id, a.status, a.message, a.created_at, a.job_id, a.maid_id, a.boosted_at,
                 j.title, j.job_type, j.county, j.area, j.salary_amount, j.status AS job_status,
                 u.full_name, u.avatar_url, u.kyc_status, u.location_county, u.location_area,
                 mp.years_experience, mp.wage_expectation,
@@ -76,7 +90,7 @@ router.get('/', requireAuth, async (req, res, next) => {
          JOIN users u ON u.id = a.maid_id
          LEFT JOIN maid_profiles mp ON mp.user_id = a.maid_id
          WHERE j.employer_id = ?
-         ORDER BY a.created_at DESC
+         ORDER BY (a.boosted_at IS NOT NULL) DESC, a.boosted_at DESC, a.created_at DESC
          LIMIT 100`,
         [req.user.uid]
       );
@@ -85,6 +99,8 @@ router.get('/', requireAuth, async (req, res, next) => {
         status: r.status,
         message: r.message || null,
         createdAt: r.created_at,
+        boosted: !!r.boosted_at,
+        boostedAt: r.boosted_at || null,
         job: {
           id: Number(r.job_id),
           title: r.title,

@@ -121,11 +121,13 @@ CREATE TABLE IF NOT EXISTS maid_profiles (
   wage_expectation INT UNSIGNED NULL,        -- KES, optional
   bio VARCHAR(500) NULL,
   photo_url VARCHAR(512) NULL,               -- upload pipeline comes with KYC phase
+  boosted_until DATETIME NULL COMMENT 'Profile Boost active until (KES 99/7d — §15.5 featured placement)',
   next_of_kin_name VARCHAR(120) NULL,
   next_of_kin_phone VARCHAR(16) NULL,
   next_of_kin_relationship VARCHAR(48) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_maid_boost (boosted_until),
   CONSTRAINT fk_maid_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -156,10 +158,12 @@ CREATE TABLE IF NOT EXISTS payments (
   result_desc VARCHAR(255) NULL,
   status ENUM('pending','success','failed') NOT NULL DEFAULT 'pending',
   raw_callback JSON NULL,
+  consumed_at DATETIME NULL COMMENT 'Entitlement spent (application_boost → one application; profile_boost → activation; §10)',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_payments_user (user_id),
   INDEX idx_payments_checkout (checkout_request_id),
+  INDEX idx_payments_entitlement (user_id, purpose, status, consumed_at),
   CONSTRAINT fk_payments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -222,10 +226,12 @@ CREATE TABLE IF NOT EXISTS job_applications (
   maid_id CHAR(36) NOT NULL,
   message VARCHAR(500) NULL,
   status ENUM('pending','accepted','rejected','withdrawn') NOT NULL DEFAULT 'pending',
+  boosted_at DATETIME NULL COMMENT 'Application Boost applied at (KES 30 — §15.5 top slot)',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_job_maid (job_id, maid_id),
   INDEX idx_app_maid (maid_id, status),
+  INDEX idx_app_boost (boosted_at),
   CONSTRAINT fk_app_job FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
   CONSTRAINT fk_app_maid FOREIGN KEY (maid_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

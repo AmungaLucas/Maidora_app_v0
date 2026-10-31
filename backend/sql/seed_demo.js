@@ -211,6 +211,35 @@ function pick(arr, i) { return arr[i % arr.length]; }
     }
     console.log(`[seed] ${APPS.length} applications inserted`);
 
+    // ── 5.5 Boost state (§15.5) — makes the FEATURED rails + boost UI live ──
+    //   • 3 maids carry an ACTIVE profile boost (KES 99/7d) → the Featured
+    //     rail on the employer home has real people in it.
+    //   • Grace's pending application to James Kamau is BOOSTED (KES 30) →
+    //     pins to the top of that employer's applicant list with a badge.
+    //   • Grace holds one banked application boost + one banked profile boost
+    //     (paid rows, unconsumed) → the Boost button and "Get featured" path
+    //     are demoable without an M-Pesa prompt.
+    const FEATURED_MAIDS = [1, 3, 7]; // Mary Achieng · Esther Mutheu · Beatrice Nyambura
+    for (const [n, idx] of FEATURED_MAIDS.entries()) {
+      await pool.query(
+        `UPDATE maid_profiles SET boosted_until = NOW() + INTERVAL ? DAY WHERE user_id = ?`,
+        [6 - n * 2, maidIds[idx]]
+      );
+    }
+    await pool.query(
+      `UPDATE job_applications SET boosted_at = NOW() - INTERVAL 1 HOUR, created_at = NOW() - INTERVAL 30 HOUR
+       WHERE job_id = ? AND maid_id = ?`,
+      [jobIds[0], maidIds[0]]
+    );
+    const gracePhone = `+25471${String(2000000).slice(0, 8)}`; // maid #0's seeded phone
+    await pool.query(
+      `INSERT INTO payments (user_id, purpose, amount, phone, status, mpesa_receipt, result_code, result_desc, created_at)
+       VALUES (?, 'application_boost', 30, ?, 'success', 'DEMOBOOST01', 0, 'Demo seed entitlement', NOW() - INTERVAL 2 HOUR),
+              (?, 'profile_boost', 99, ?, 'success', 'DEMOBOOST02', 0, 'Demo seed entitlement', NOW() - INTERVAL 3 HOUR)`,
+      [maidIds[0], gracePhone, maidIds[0], gracePhone]
+    );
+    console.log('[seed] boost state: 3 featured maids · 1 boosted application · 2 banked boosts for Grace');
+
     // ── 6. Chat threads + messages (2 live conversations) ───────────────────
     async function thread(employerName, maidIdx, msgs) {
       const a = [employerIds[employerName], maidIds[maidIdx]].sort();

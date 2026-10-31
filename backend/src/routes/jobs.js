@@ -220,7 +220,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
     let applications = null;
     if (isOwner) {
       const [apps] = await pool.query(
-        `SELECT a.id, a.status, a.message, a.created_at, a.maid_id,
+        `SELECT a.id, a.status, a.message, a.created_at, a.maid_id, a.boosted_at,
                 u.full_name, u.avatar_url, u.kyc_status, u.location_county, u.location_area,
                 mp.years_experience, mp.wage_expectation, mp.job_type,
                 TIMESTAMPDIFF(DAY, u.last_active_at, NOW()) AS days_idle
@@ -228,7 +228,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
          JOIN users u ON u.id = a.maid_id
          LEFT JOIN maid_profiles mp ON mp.user_id = a.maid_id
          WHERE a.job_id = ? AND a.status != 'withdrawn'
-         ORDER BY a.created_at DESC
+         ORDER BY (a.boosted_at IS NOT NULL) DESC, a.boosted_at DESC, a.created_at DESC
          LIMIT 100`,
         [id]
       );
@@ -237,6 +237,10 @@ router.get('/:id', requireAuth, async (req, res, next) => {
         status: a.status,
         message: a.message || null,
         createdAt: a.created_at,
+        // §15.5 — boosted applications (KES 30) pin to the TOP of this list
+        // (ORDER above) and carry the Boosted chip in the applicants UI.
+        boosted: !!a.boosted_at,
+        boostedAt: a.boosted_at || null,
         maid: {
           id: a.maid_id,
           fullName: a.full_name,
