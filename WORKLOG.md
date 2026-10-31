@@ -6,6 +6,42 @@
 
 ---
 
+## 2026-11-01 — FIX: "Something went wrong" on every job post — missing employer_id SQL placeholder + marketplace log trail (owner report)
+
+Owner: "trying to create a job i get something went wrong please try again... lets log".
+
+**Root cause (from the server's own trail).** `POST /api/jobs` built its INSERT as
+`VALUES (${cols.map(() => '?')…})` — one `?` per payload column but **no
+placeholder for `employer_id`**: 7 columns, 6 `?`, 7 params → MySQL
+`ER_WRONG_VALUE_COUNT_ON_ROW (1136)` on EVERY post → the gateway's generic 500
+("Something went wrong. Please try again."). The central error handler had been
+logging the full SQL into `stderr.log` all along — four owner attempts visible,
+zero rows inserted. Fix in `jobs.js`: `VALUES (?, ${placeholders})` —
+`employer_id` first, the exact pattern the `profile.js` upserts already used
+correctly (audited every dynamic INSERT in `src/` — jobs.js was the only
+offender). Deployed via `scripts/deploy_jobs_fix.py` (backup → upload →
+`node --check` → restart → health; one 503 blip mid-restart, then green).
+
+**"lets log" — the app now carries its own evidence.** Marketplace round trips
+joined the log-trail convention in `src/api.js`: `[JOBS]` (jobs + applications),
+`[CHAT]`, `[MAIDS]`, `[BOOST]` — one line per call (method · path · status ·
+latency; on failure the raw error name/message/status), the same shape as
+`[MPESA]`/`[KYC]`/`[AUTH]`, so the next failing marketplace call prints its
+evidence in Metro next to the server's stderr trail instead of a bare banner.
+Takes an app reload to pick up (no release needed).
+
+**E2E on the live gateway** (`scripts/jobs_fix_e2e.py`): register → OTP inject →
+verify → onboarding(employer) → **POST /jobs with salary → 201** (owner's exact
+failing shape, job #31) → POST /jobs without salary → 201 (job #32, null
+branch) → /jobs/mine lists both → open feed shows both → PATCH close → 200 →
+invalid payload → **400 with per-field errors** (never a 500 — the PostJob form
+now gets real messages like "Give the job a clear title (5–120 characters)") →
+test user DELETE cascades both jobs (`fk_jobs_employer`). Server trail after
+deploy: `[JOBS] job #31/#32 posted…`, no new column-count errors.
+Gotcha recorded: `/auth/onboarding` returns a **refreshed token carrying the
+role claim** — clients/scripts must adopt it, or the old `role:null` token
+403s at the employer gate (cost one E2E iteration).
+
 ## 2026-11-01 — MARKETPLACE SHIP: search + jobs + applications (§9) + real chat · seed data · home avatar + approved-banner fixes (owner request)
 
 Owner: "fix homescreen avatar · once verification is approved we don't need the

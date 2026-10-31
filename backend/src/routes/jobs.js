@@ -102,9 +102,12 @@ router.post('/', requireAuth, requireVerified, async (req, res, next) => {
       return res.status(400).json({ message: errors[first], errors, field: first });
     }
     const cols = Object.keys(values);
+    // One `?` for employer_id + one per payload column — the employer_id
+    // placeholder was missing (6 ? for 7 columns), so EVERY job post died
+    // with ER_WRONG_VALUE_COUNT_ON_ROW → the gateway's generic 500.
     const [ins] = await pool.query(
       `INSERT INTO jobs (employer_id, ${cols.map((c) => `\`${c}\``).join(', ')})
-       VALUES (${cols.map(() => '?').join(', ')})`,
+       VALUES (?, ${cols.map(() => '?').join(', ')})`,
       [req.user.uid, ...cols.map((c) => values[c])]
     );
     console.error(`[JOBS] job #${ins.insertId} posted by ${req.user.uid} — "${values.title}" (${values.job_type}, ${values.county || '-'})`);

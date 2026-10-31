@@ -11,6 +11,25 @@ const KYC_PATH = /^\/(kyc|media)(\/|$)/;
 // so "login did nothing" style reports arrive with their own trail next to
 // the [AUTH] state logs from AppContext/App.js.
 const AUTH_PATH = /^\/auth(\/|$)/;
+// Marketplace round trips join the same trail — [JOBS] covers jobs +
+// applications, [CHAT] chat, [MAIDS] search/rails/profiles, [BOOST] boost
+// spends. When a marketplace call fails, the Metro log carries its evidence
+// (method, path, latency, exact error) next to the server's [gateway]/[JOBS]
+// stderr entries instead of a bare "Something went wrong" banner.
+const MARKET_TAGS = [
+  [/^\/(jobs|applications)(\/|$)/, '[JOBS]'],
+  [/^\/chat(\/|$)/, '[CHAT]'],
+  [/^\/maids(\/|$)/, '[MAIDS]'],
+  [/^\/boosts(\/|$)/, '[BOOST]'],
+];
+
+function logTag(path) {
+  if (path.startsWith('/payments')) return '[MPESA]';
+  if (KYC_PATH.test(path)) return '[KYC]';
+  if (AUTH_PATH.test(path)) return '[AUTH]';
+  for (const [re, tag] of MARKET_TAGS) if (re.test(path)) return tag;
+  return null;
+}
 
 export class ApiError extends Error {
   constructor(message, status, code, field) {
@@ -29,6 +48,8 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
   const kycTag = KYC_PATH.test(path)
     ? ` [${body?.dataBase64 ? kbOf(body.dataBase64) : method === 'POST' || method === 'PUT' ? 'json' : 'no-body'}]`
     : '';
+  // Declared before try — the catch block needs it for the failure line.
+  const tag = logTag(path);
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method,
@@ -54,36 +75,20 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
         data && data.field
       );
     }
-    // Payment-flow tracing — every M-Pesa request logs its round trip so the
-    // owner can follow the whole journey in the Metro/console output.
-    if (path.startsWith('/payments')) {
-      console.log(`[MPESA] ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
-    }
-    if (KYC_PATH.test(path)) {
-      console.log(`[KYC]${kycTag} ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
-    }
-    if (AUTH_PATH.test(path)) {
-      console.log(`[AUTH] ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
+    // Round-trip tracing — every traced request logs one line so the owner
+    // can follow the whole journey in the Metro/console output.
+    if (tag) {
+      console.log(`${tag}${KYC_PATH.test(path) ? kycTag : ''} ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
     }
     return data;
   } catch (e) {
     const msg = String((e && e.message) || '');
     const name = String((e && e.name) || '');
-    if (path.startsWith('/payments')) {
+    if (tag) {
       // Raw shape too — "fetch has been cancelled" style errors used to slip
       // past the friendly mapping; log exactly what the device produced.
       console.log(
-        `[MPESA] ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
-      );
-    }
-    if (KYC_PATH.test(path)) {
-      console.log(
-        `[KYC]${kycTag} ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
-      );
-    }
-    if (AUTH_PATH.test(path)) {
-      console.log(
-        `[AUTH] ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
+        `${tag}${KYC_PATH.test(path) ? kycTag : ''} ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
       );
     }
     // The device's fetch rejects with different shapes for a cancelled call
