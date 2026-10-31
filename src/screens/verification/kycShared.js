@@ -272,7 +272,13 @@ export function centerCropForAspect(photo, aspect) {
 // the user framed (WYSIWYG). Gallery picks never flip.
 export async function cropToWebp(picked, crop, maxW = 1400, flipH = false) {
   let ref = ImageManipulator.manipulate(picked.uri);
-  if (flipH) ref = ref.flip({ horizontal: true });
+  // 2026-10-31 crash fix: the context API takes a FlipType STRING
+  // ('horizontal' | 'vertical'), not an options object. Passing
+  // { horizontal: true } made the Android Kotlin bridge throw
+  // "Cannot convert '[object Object]' to a Kotlin type" on EVERY
+  // front-camera shot (selfie, and any doc capture after flipping to
+  // the front lens) — the photo was taken but the pipeline died here.
+  if (flipH) ref = ref.flip('horizontal');
   if (crop && crop.width > 0 && crop.height > 0) ref = ref.crop(crop);
   const w = crop ? crop.width : picked.width || 0;
   if (w > maxW) ref = ref.resize({ width: maxW });

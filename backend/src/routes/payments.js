@@ -181,7 +181,8 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       });
     }
 
-    const [[u]] = await pool.query('SELECT phone FROM users WHERE id = ? LIMIT 1', [req.user.uid]);
+    // kyc_urgent also rides along here — see the double-pay guard below.
+    const [[u]] = await pool.query('SELECT phone, kyc_urgent FROM users WHERE id = ? LIMIT 1', [req.user.uid]);
     if (!u) return res.status(401).json({ message: 'Session expired. Please log in again.' });
 
     const phone = normalizePhone((req.body && req.body.phone) || u.phone);
@@ -210,6 +211,42 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
           console.error(`[MPESA] purpose ${purpose} price enforced: client sent ${amount}, table says ${fixed} — using ${fixed}`);
           amount = fixed;
         }
+      }
+    }
+
+    // §8 double-pay guard for the urgent review (2026-10-31, owner request —
+    // "so that user cannot pay twice"). Two refusals, both 409 with a code
+    // the app understands:
+    //   already_paid    — users.kyc_urgent is set the moment a kyc_urgent
+    //                     payment settles, so a paid user never sees a
+    //                     second prompt; the app flips to the paid card.
+    //   pending_payment — one OPEN prompt at a time. A second kyc_urgent
+    //                     push while a previous prompt may still be approved
+    //                     could charge twice (both would settle). Rows older
+    //                     than 10 minutes no longer block (the prompt has
+    //                     long expired; window matches the app's resume
+    //                     window).
+    if (purpose === 'kyc_urgent') {
+      if (Number(u.kyc_urgent) === 1) {
+        console.error(`[MPESA] stk-push refused for user ${req.user.uid}: kyc_urgent already paid`);
+        return res.status(409).json({
+          message: 'The urgent review is already paid and active for this account.',
+          code: 'already_paid',
+        });
+      }
+      const [[openRow]] = await pool.query(
+        `SELECT id FROM payments
+         WHERE user_id = ? AND purpose = 'kyc_urgent' AND status = 'pending'
+           AND created_at > (NOW() - INTERVAL 10 MINUTE)
+         LIMIT 1`,
+        [req.user.uid]
+      );
+      if (openRow) {
+        console.error(`[MPESA] stk-push refused for user ${req.user.uid}: kyc_urgent payment #${openRow.id} still pending`);
+        return res.status(409).json({
+          message: 'A payment prompt is already open on your phone — complete or cancel it first.',
+          code: 'pending_payment',
+        });
       }
     }
     console.error(

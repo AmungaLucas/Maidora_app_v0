@@ -6,6 +6,59 @@
 
 ---
 
+## 2026-10-31 — Front-camera shot crash fix + urgent upsell revamp (tracker, paid card, live price, double-pay guard)
+
+Owner live report: shutter in selfie mode (or any doc shot after flipping to
+the front lens) died with "[flip] Cannot convert '[object Object]' to a
+Kotlin type" — photo taken, pipeline dead; "Go urgent" needed the payment
+screen's progress indicator and, when done, a paid confirmation instead of
+the button "so that user cannot pay twice" (button returns on failure); and
+the intro still showed KES 150 after the DB price was changed (the STK
+prompt itself carried the new price).
+
+- **Shot crash**: `cropToWebp` called the expo-image-manipulator context as
+  `ref.flip({ horizontal: true })` — the installed API takes a FlipType
+  STRING (`flip('horizontal')`); the object hit the Kotlin bridge and threw
+  `UnexpectedException: Cannot convert '[object Object]' to a Kotlin type`
+  on EVERY front-camera capture (selfie always; a doc capture after a flip
+  too). The mirroring logic itself was right — only the call shape was
+  wrong. The stray `TypeError: Cannot read property 'filter' of undefined`
+  only ever appeared in tandem with this crash (also at the tail of the
+  previous session's log) — same native-exception path, expected gone with
+  the fix; the [KYC] trace will confirm on the next live run.
+- **Urgent upsell revamp (`KycIntroScreen`)**: tapping "Go urgent" takes
+  over the card with the SAME 4-step staged tracker as the payment screen
+  (gateway accepted → prompt sent → enter M-Pesa PIN with countdown →
+  confirmed), 4s×52 polling with the poll-overlap guard, adopt-pending on a
+  timed-out push, "Didn't get a prompt?" tips, and a stopped state with
+  Keep checking / "Close — pay later". On SUCCESS the card becomes a paid
+  confirmation (M-Pesa receipt shown once the callback has landed) and the
+  button is gone — nothing to pay twice; the parent re-fetches `/kyc` so
+  server truth (`users.kyc_urgent`, granted by the settlement paths) drives
+  the card across app restarts. On FAILURE the reason maps from the Daraja
+  result code (same table as the payment screen) and "Try again · KSh
+  {price}" returns. The intro screen now also re-fetches `/kyc` on every
+  focus (`useFocusEffect`), not just on mount.
+- **Live price**: the upsell reads `GET /payments/purposes` on mount and
+  shows the `kyc_urgent` row amount (fallback 150 only while offline /
+  pre-migration). The owner's repricing test (150 → 5) now shows on the
+  very next visit to the screen; the server was already enforcing the table
+  price at push time (his own payment #61: row = 5.00 while the client sent
+  150) — the UI was the only stale part.
+- **Double-pay guard (backend `stk-push`, deployed)**: purpose `kyc_urgent`
+  is refused with 409 when `users.kyc_urgent` is already set (`already_paid`
+  — the app flips straight to the paid card) or when a `kyc_urgent` payment
+  is still pending and younger than 10 minutes (`pending_payment` — one
+  open prompt at a time; two live prompts could both be approved and charge
+  twice; the 10-min window matches the app's resume window so abandoned
+  rows don't block forever). Deploy `scripts/deploy_urgent_guard.py`
+  (backup → upload → node --check → restart → health 200; post-deploy DB
+  check: kyc_urgent = 5.00 active, no users granted yet, owner's test
+  pushes all rc=1032 unpaid).
+- **Validation**: `check_jsx.js` 16/16; backend `node --check` ok.
+
+---
+
 ## 2026-10-31 — KYC resume thumbnails (data-URI read path) + selfie mirror + camera flip
 
 Owner live report: (1) "i took a selfie with the front camera and the image
