@@ -144,7 +144,7 @@ export default function HomeScreen({ navigation }) {
               Profile strength — {completeness.done}/{completeness.total}
             </Text>
             <Text style={styles.completenessBody} numberOfLines={2}>
-              Add: {completeness.missing.join(', ')}. This never blocks you.
+              Add: {(completeness.missing || []).join(', ')}. This never blocks you.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.muted} />

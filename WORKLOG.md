@@ -6,6 +6,35 @@
 
 ---
 
+## 2026-10-31 — Employer Profile crash: `filter of undefined` (owner report)
+
+Owner report: on the **employer** account, `TypeError: Cannot read property
+'filter' of undefined` fired on BOTH Profile entry points — tapping the Home
+"Profile strength" banner and tapping the avatar → Profile. This also
+corrects the previous session's assumption that the stray error was fallout
+from the front-camera native crash: it is **independent and employer-side**
+(employers never touch the KYC camera).
+
+- **Root cause**: `CompletenessWizard` renders (as an invisible Modal) the
+  moment `ProfileScreen` mounts, and its render path computed
+  `customLangs = form.languages.filter(...)` unconditionally — but the
+  employer form shape (`emptyForm(false)` and the employer `hydrate` branch)
+  never had a `languages` key. `undefined.filter` threw on EVERY Profile
+  open for employers; the languages step is maid-only, yet the line ran for
+  both roles.
+- **Fix (same crash class, all guarded)**: employer `emptyForm`/`hydrate`
+  now carry `languages: []` (total form shape for both roles);
+  `customLangs` is computed from an `Array.isArray` guard; and the two
+  `missing.join(', ')` renders — HomeScreen's strength banner and the
+  wizard's done card — are `(… || [])`-guarded, so a server shape change
+  (dropping `missing`) can never take either screen down the same way.
+- **Verified**: Babel parse OK on both files; a render-path simulation
+  reproduced the exact reported error on the old shape and confirmed the
+  new shape returns `[]` with no throw. Smoke suite untouched (no logic
+  paths changed beyond the guards).
+- **Test on device**: reload in Expo Go → employer Home → tap the strength
+  banner, then the avatar; Profile should open clean both ways.
+
 ## 2026-10-31 — Front-camera shot crash fix + urgent upsell revamp (tracker, paid card, live price, double-pay guard)
 
 Owner live report: shutter in selfie mode (or any doc shot after flipping to

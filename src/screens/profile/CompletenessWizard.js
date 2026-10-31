@@ -55,7 +55,7 @@ const emptyForm = (isMaid) =>
         nokPhone: '',
         nokRelationship: '',
       }
-    : { householdSize: '', numChildren: '', budgetAmount: '' };
+    : { householdSize: '', numChildren: '', budgetAmount: '', languages: [] };
 
 const hydrate = (isMaid, p) =>
   isMaid
@@ -78,6 +78,9 @@ const hydrate = (isMaid, p) =>
         nokRelationship: p?.nextOfKin?.relationship || '',
       }
     : {
+        // Total form shape for BOTH roles — employers have no languages step,
+        // but render-path helpers below read form.languages unconditionally.
+        languages: Array.isArray(p?.languages) ? p.languages : [],
         householdSize:
           p?.householdSize === null || p?.householdSize === undefined
             ? ''
@@ -333,7 +336,13 @@ export default function CompletenessWizard({ visible, role, token, onSaved, onCl
     setLangOtherOpen(false);
   };
 
-  const customLangs = form.languages.filter((l) => !KENYAN_LANGUAGES.includes(l));
+  // Guarded: the wizard renders (invisible Modal) as soon as the Profile
+  // screen mounts — for employers form.languages used to be undefined here,
+  // throwing "Cannot read property 'filter' of undefined" on every Profile
+  // open. Array.isArray keeps the render path safe for any future shape.
+  const customLangs = (Array.isArray(form.languages) ? form.languages : []).filter(
+    (l) => !KENYAN_LANGUAGES.includes(l)
+  );
 
   // ── Step bodies ───────────────────────────────────────────────────────────
   const step = steps[index];
@@ -604,7 +613,7 @@ export default function CompletenessWizard({ visible, role, token, onSaved, onCl
                   ? isMaid
                     ? 'Households see everything they need to trust and hire you.'
                     : 'Maids can see the household context they need before applying.'
-                  : `Still open: ${finished.missing.join(', ')}. You can finish any time — it never blocks you.`}
+                  : `Still open: ${(finished.missing || []).join(', ')}. You can finish any time — it never blocks you.`}
               </Text>
               <PrimaryButton title="Back to my profile" onPress={onClose} />
             </View>
