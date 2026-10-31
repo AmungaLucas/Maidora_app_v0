@@ -6,6 +6,49 @@
 
 ---
 
+## 2026-11-01 — M-Pesa "fetch failed" root-caused + fixed: cause surfacing + one connect-retry (deployed, E2E 7/7)
+
+Owner's field logs (same session that confirmed resetRoot): KYC submitted clean,
+then the urgent upsell STK push failed TWICE — `payment #1/#2 failed — rc=null
+"M-Pesa STK push unreachable: fetch failed"`. A third manual tap (after the
+pasted log) succeeded and the callback settled with receipt `UJV6N0EZCT`.
+
+**Root cause (proven from `stderr.log` + probes on the box).** Rows #1/#2 both
+died at **~10.5 s** — that is undici's built-in **10 s connect timeout**, and
+the telahost → `api.safaricom.co.ke` route is simply slow/lossy (same day:
+OAuth 2.3 s, 5.7 s; push 7.7 s; curl connect 0.25 s → 3.8 s in Node). When TCP
+connect exceeds 10 s, Node's global fetch throws the opaque `fetch failed`
+with the real reason in `err.cause` — which `darajaFetch` never read, so the
+log and the payment-row reason were blind. DNS/credentials/TLS all fine
+(getent → `196.201.214.202` v4-only; unauthenticated OAuth probe → HTTP 400 in
+~1 s; Node fetch probe OK).
+
+**Fix — `backend/src/services/mpesa.js` (deploy `scripts/deploy_mpesa_connect_retry.py`, E2E 7/7, row #4 accepted):**
+1. `networkReason()` walks the `err.cause` chain and appends the undici/OS
+   codes — failures now read e.g. `M-Pesa STK push unreachable: fetch failed
+   (UND_ERR_CONNECT_TIMEOUT · Connect Timeout Error)` instead of bare
+   "fetch failed", in the stderr log AND in the reason stored on the payment
+   row / shown to the user. (Offline-verified: ENOTFOUND extracts
+   `ENOTFOUND · getaddrinfo …`, our own AbortSignal deadline stays
+   `no response within Xms` and is NOT classified as connect-class.)
+2. `isConnectClassError()` + ONE automatic retry (1.2 s backoff) for
+   **connect-class failures only** — DNS (ENOTFOUND/EAI_AGAIN), TCP connect
+   (UND_ERR_CONNECT_TIMEOUT, ETIMEDOUT w/ syscall=connect), refused/unreachable
+   (ECONNREFUSED/EHOSTUNREACH/ENETUNREACH). The request provably never left
+   the box, so a retry can never double-prompt the customer. Mid-response
+   resets and our own deadlines are deliberately NOT retried — the push may
+   already be on its way; a blind retry could charge twice. Worst case row
+   stays pending ~2×25 s + 1.2 s — the app polls 4 s × 52, plenty.
+3. Removed the shadowed duplicate `getAccessToken`/`requestToken` pair (the
+   second declaration silently won since harden2; first was dead code).
+
+**Not yet fixable from code:** the route itself. If connect-timeout failures
+persist even WITH the retry, the next lever is a keep-alive agent/dispatcher
+with a raised connect timeout, or asking the host about egress quality to
+Safaricom. The surfaced cause codes will make that call data-driven.
+
+---
+
 ## 2026-11-01 — resetRoot routing CONFIRMED on device · signup location permission ask · OTP screen revamp
 
 Owner: "Great now working fine... after otp i get to the role select screen,

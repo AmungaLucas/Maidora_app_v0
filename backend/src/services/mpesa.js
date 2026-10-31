@@ -26,43 +26,6 @@ let tokenFetchPromise = null; // in-flight refresh — two concurrent background
 const nowMs = () => Date.now();
 const elapsed = (t0) => `${Date.now() - t0}ms`;
 
-function requestToken() {
-  const t0 = nowMs();
-  console.error('[MPESA] OAuth token missing/expired — requesting a new one…');
-  const basic = Buffer.from(`${m.consumerKey}:${m.consumerSecret}`).toString('base64');
-  return (async () => {
-    const res = await darajaFetch(
-      `${m.baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
-      { headers: { Authorization: `Basic ${basic}` } },
-      OAUTH_TIMEOUT_MS,
-      'OAuth'
-    );
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data || !data.access_token) {
-      console.error(`[MPESA] OAuth rejected after ${elapsed(t0)}: ${(data && (data.errorMessage || data.error)) || `HTTP ${res.status}`}`);
-      throw mpesaError(
-        (data && (data.errorMessage || data.error)) ||
-          'M-Pesa authentication failed. Check consumer key/secret.',
-        data
-      );
-    }
-    const ttlS = Number(data.expires_in || 3599);
-    cachedToken = { token: data.access_token, expiresAtMs: Date.now() + Math.max(60, ttlS - 60) * 1000 };
-    console.error(`[MPESA] OAuth OK in ${elapsed(t0)} — token cached for ~${Math.round((cachedToken.expiresAtMs - Date.now()) / 1000)}s`);
-    return cachedToken.token;
-  })();
-}
-
-async function getAccessToken() {
-  if (cachedToken && Date.now() < cachedToken.expiresAtMs) return cachedToken.token;
-  if (!tokenFetchPromise) {
-    tokenFetchPromise = requestToken().finally(() => {
-      tokenFetchPromise = null; // failed or finished — next caller retries fresh
-    });
-  }
-  return tokenFetchPromise;
-}
-
 function isConfigured() {
   return Boolean(
     m.consumerKey && m.consumerSecret && m.shortcode && m.passkey && m.partyB && m.callbackUrl
@@ -76,22 +39,76 @@ function mpesaError(message, provider) {
   return err;
 }
 
+// undici's bare "fetch failed" hides the real reason in err.cause. Dig it out
+// (one level is usually enough, but walk the chain just in case) so the log —
+// and the reason stored on the payment row — actually names the problem.
+function networkReason(e, timeoutMs) {
+  if (!e) return 'network error';
+  if (e.name === 'TimeoutError') return `no response within ${timeoutMs}ms`;
+  const bits = [];
+  let c = e.cause;
+  while (c) {
+    if (c.code) bits.push(String(c.code));
+    if (c.message && c.message !== e.message) bits.push(String(c.message));
+    c = c.cause;
+  }
+  const causeStr = bits.length ? ` (${bits.slice(0, 3).join(' · ')})` : '';
+  return `${e.message || 'network error'}${causeStr}`;
+}
+
+// Connect-class network errors = the request NEVER LEFT this box (DNS, TCP
+// connect, TLS handshake) — Daraja never saw attempt 1, so retrying is safe:
+// it cannot double-prompt the customer. Everything else (reset mid-response,
+// our own AbortSignal deadline, socket hang-up after send) is NOT retried —
+// the push may already be on its way and a blind retry could charge twice.
+// Observed live 2026-10-31: the tela-host→api.safaricom.co.ke route is lossy;
+// undici's built-in 10s connect timeout produced two "fetch failed" rows
+// (~10.5s each) before a third manual attempt succeeded in 7.7s.
+function isConnectClassError(e) {
+  const connectCodes = new Set([
+    'UND_ERR_CONNECT_TIMEOUT',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ECONNREFUSED',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+  ]);
+  let c = e && e.cause;
+  while (c) {
+    if (connectCodes.has(c.code)) return true;
+    // OS-level connect timeout: ETIMEDOUT tagged with syscall 'connect'
+    if (c.code === 'ETIMEDOUT' && (c.syscall === 'connect' || c.syscall === undefined)) return true;
+    c = c.cause;
+  }
+  return false;
+}
+
+const CONNECT_RETRY_BACKOFF_MS = 1200;
+
 // fetch() with a hard deadline; network/abort failures become readable
-// provider errors instead of undici's bare "fetch failed".
+// provider errors instead of undici's bare "fetch failed". Connect-class
+// failures get ONE automatic retry (attempt 2/2) — the first attempt provably
+// never reached Daraja, so this can never double-prompt.
 async function darajaFetch(url, opts, timeoutMs, label) {
   const t0 = nowMs();
-  try {
-    const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
-    console.error(`[MPESA] ${label} → HTTP ${res.status} in ${elapsed(t0)}`);
-    return res;
-  } catch (e) {
-    const reason =
-      e && e.name === 'TimeoutError'
-        ? `no response within ${timeoutMs}ms`
-        : (e && e.message) || 'network error';
-    console.error(`[MPESA] ${label} FAILED after ${elapsed(t0)}: ${reason}`);
-    throw mpesaError(`M-Pesa ${label} unreachable: ${reason}`, null);
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
+      console.error(`[MPESA] ${label} → HTTP ${res.status} in ${elapsed(t0)}`);
+      return res;
+    } catch (e) {
+      lastErr = e;
+      const retryable = isConnectClassError(e) && attempt < 2;
+      console.error(
+        `[MPESA] ${label} FAILED after ${elapsed(t0)} (attempt ${attempt}/2): ${networkReason(e, timeoutMs)}` +
+          (retryable ? ' — request never reached Daraja, retrying once…' : '')
+      );
+      if (!retryable) break;
+      await new Promise((r) => setTimeout(r, CONNECT_RETRY_BACKOFF_MS));
+    }
   }
+  throw mpesaError(`M-Pesa ${label} unreachable: ${networkReason(lastErr, timeoutMs)}`, null);
 }
 
 function timestamp() {
@@ -122,6 +139,15 @@ function shortCodePassword(ts) {
 
 async function getAccessToken() {
   if (cachedToken && Date.now() < cachedToken.expiresAtMs) return cachedToken.token;
+  if (!tokenFetchPromise) {
+    tokenFetchPromise = requestToken().finally(() => {
+      tokenFetchPromise = null; // failed or finished — next caller retries fresh
+    });
+  }
+  return tokenFetchPromise;
+}
+
+async function requestToken() {
   const t0 = nowMs();
   console.error('[MPESA] OAuth token missing/expired — requesting a new one…');
   const basic = Buffer.from(`${m.consumerKey}:${m.consumerSecret}`).toString('base64');
