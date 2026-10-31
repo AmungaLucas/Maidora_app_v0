@@ -35,10 +35,11 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
-| KYC flow (§8) | 🟡 SUBMISSION LIVE | 8-step app flow + draft/images/submit API + urgent KSh 150 STK grant; review tooling + blur/glare ML deferred (see §10). **Personal step fixes 2026-10-31 (owner live report)**: DOB now prefills from the §7 profile when the KYC draft is empty (same lowercase gender enum, 1:1); DOB state is ISO-only (the display string was being round-tripped through a DD-MM-YYYY parser — EVERY picker-picked DOB failed Continue with an error that was never rendered, i.e. the dead-Continue bug); `errors.dob` now renders (red text + field border); gender pills rebuilt (icon + label, forest fill + cream text + check when selected — the old SecondaryButton chips were forest-on-forest when selected) |
+| KYC flow (§8) | 🟡 SUBMISSION LIVE | **4-step flow 2026-10-31**: personal → doc type → photos checklist → review (was 8 separate screens). Draft/images/submit API + urgent KSh 150 STK grant unchanged; review tooling + blur/glare ML deferred (see §10). **Personal step fixes 2026-10-31 (owner live report)**: DOB now prefills from the §7 profile when the KYC draft is empty (same lowercase gender enum, 1:1); DOB state is ISO-only (the display string was being round-tripped through a DD-MM-YYYY parser — EVERY picker-picked DOB failed Continue with an error that was never rendered, i.e. the dead-Continue bug); `errors.dob` now renders (red text + field border); gender pills rebuilt (icon + label, forest fill + cream text + check when selected — the old SecondaryButton chips were forest-on-forest when selected) |
+| KYC capture REBUILD — one checklist + guided in-app camera (owner request 2026-10-31) | ✅ LIVE | **One screen** (`KycCaptureScreen`, route `KycCapture`) lists ID front + ID back (per doc type) + live selfie as cards with thumbnails and per-item status (Needed / Uploading / Upload failed→retry / Added) — the old KycDocFront / KycDocBack / KycSelfie / DocCaptureScreen are DELETED. **GuidedCapture** (in-app `expo-camera` CameraView modal, SDK 58) draws a scrim + guide frame — rounded **rect for documents (16:10)**, **oval for the selfie (3:4)**, circle for the avatar — and **crops the shot to that exact frame** (cover-fit preview→photo mapping `frameCropForPhoto`, center-crop fallback for gallery picks, WebP via `cropToWebp`). **Fixes the "app restarts after OK" bug**: the old `launchCameraAsync` + `allowsEditing` pipeline handed control to a foreign camera activity + OS crop editor, which reloads Expo Go — the in-app CameraView never leaves the app. Gallery path (documents + avatar) center-crops to the same frame and passes the same confirm stage (Retake / Use photo); selfies are live-only (§33.1). Torch toggle on the document camera; permission denial renders an inline explainer with Open-settings (no OS popup). Review retakes jump into the focused item's capture (`{ focus: 'id_front'|'id_back'|'selfie', returnTo: 'KycReview' }`). Smoke test `scripts/smoke_kyc_capture.js`: 34/34 (imports, crop-math units, route integrity, 12 screen renders via React-19 hook dispatcher) |
 | Pricing table `payment_purposes` (§9) | ✅ LIVE | migrate_v5 (2026-10-31): purpose catalog moved OUT of the app into the DB — label, description, `amount_kes` (NULL = any), audience, STK labels, `is_active`, `sort_order`. `GET /api/payments/purposes` feeds the app picker (owner changes prices with NO app release); stk-push validates (unknown→400, inactive→409) and **enforces fixed prices server-side**; purpose label joined onto payment views so the success screen shows "Maid Gold · KES 500". Seeded: app_test any · kyc_urgent 150 (owner-confirmed) · profile_boost 100 · maid_basic 200 · maid_gold 500 · employer_gold 500 (provisional); application/application_boost seeded INACTIVE. E2E 22/22 |
 | Media pipeline `media.maidora.co.ke` (§5.5) | ✅ LIVE | Owner-created subdomain; `POST /media/avatar` (public, unguessable names, immutable cache) + `POST /media/kyc/:field` (web-DENIED dir, authenticated stream only). Base64 JSON ≤5 MB, magic-byte sniff (WebP/JPEG/PNG), sha256, `media_assets` audit rows, old-file replace. Client converts captures to **WebP** before upload (≤1400 px docs / ≤900 px selfie / ≤600 px avatar). Avatar upload wired into ProfileScreen (camera-badge button) + drawer identity header. LiteSpeed uid trap solved (avatars 0644, KYC 0600). E2E 22/22 incl. deny + magic checks |
-| KYC capture crash fix (owner live report) | ✅ LIVE | "Cannot read property 'step' of undefined" — the wrapper screens pass the capture target as a PROP but DocCaptureScreen read `route.params?.field` (undefined on the normal forward flow → `CONFIG[undefined]` → crash the moment the user reached step 3, exactly the report). Now prop-first + params-fallback; unknown field renders a graceful fallback (never crashes); selfie Continue → KycReview (CONFIG.selfie had NO `next` — second latent TypeError); draft image keys unified via `IMG_KEY` (`id_front`↔`idFront` mix-up silently hid remote images on capture + review screens). Render smoke 16/16 |
+| Brand action sheet + edge-to-edge layout fix (owner request 2026-10-31) | ✅ LIVE | **ActionSheet** (`src/components/common/ActionSheet.js`) — brand-styled bottom sheet (handle, icon rows, cancel, nav-bar inset) replaces OS Alert choosers: document "Add photo" (take photo / gallery), profile-photo chooser, and gallery-permission guidance. **Root layout**: the KYC screens rendered raw ScrollViews and sat **edge-to-edge under the status bar AND the Android nav bar** (`edgeToEdgeEnabled: true`) — all four now render inside the safe-area `Screen` wrapper (top/left/right/bottom insets). Rule added to §4.5: every screen roots in `Screen`, never a bare ScrollView |
 | Paywall after 2 applications (§9) | ⏳ PENDING | Needs applications first |
 | Visibility decay ranking (§10) | ⏳ PENDING | `last_active_at` collected; ranking ships with search |
 | Real chat backend | ⏳ PENDING | Chats tab is a placeholder |
@@ -122,7 +123,9 @@ unset → RoleSelect (onboarding)` · `onboardingComplete → Login` · else
 `Welcome`.
 
 - **native-stack:** Welcome, Signup, Otp, Login, RoleSelect (onboarding mode
-  when the signed-in user has no role), ForgotPassword, Payment.
+  when the signed-in user has no role), ForgotPassword, Payment,
+  KycIntro, KycPersonal, KycDocType, **KycCapture** (the ONE photos screen),
+  KycReview, KycDone.
 - **Employer tabs:** Home · My Jobs · Maids · Chats · Profile.
 - **Househelp tabs:** Home · Find Jobs · Applications · Chats · Profile.
 - **Flow change (2026-10-29, spec §3.2):** role is chosen AFTER verification —
@@ -145,6 +148,9 @@ unset → RoleSelect (onboarding)` · `onboardingComplete → Login` · else
 | My Jobs / Maids / Find Jobs / Applications | respective files | ⏳ placeholders |
 | Chats | `ChatsScreen.js` | ⏳ placeholder |
 | Settings | `SettingsScreen.js` | ✅ live |
+| KYC intro / personal / doc type | `verification/KycIntroScreen.js`, `KycPersonalScreen.js`, `KycDocTypeScreen.js` | ✅ live (draft autosave, DOB picker, gender pills) |
+| KYC photos checklist (front + back + selfie) | `verification/KycCaptureScreen.js` + `GuidedCapture.js` | ✅ live (guided frames, exact crop, WebP upload per item) |
+| KYC review / done | `verification/KycReviewScreen.js`, `KycDoneScreen.js` | ✅ live (per-item retake → focused capture) |
 
 ### 4.4 Brand system
 
@@ -162,6 +168,14 @@ unset → RoleSelect (onboarding)` · `onboardingComplete → Login` · else
   `['top','left','right']`).
 - The tab bar must **not** set fixed height or `position:'absolute'` — React
   Navigation v7 auto-pads above the system nav bar (`src/navigation/Tabs.js`).
+- **Every screen roots in `Screen` — never a bare ScrollView/View at the top
+  of a screen component.** (Owner report 2026-10-31: the KYC screens used raw
+  ScrollViews and rendered edge-to-edge under the status bar and the Android
+  navigation bar because `edgeToEdgeEnabled: true`. All four now use
+  `Screen`; keep it that way.)
+- Bottom sheets (`ActionSheet`, `BottomSheetModal`) pad themselves with
+  `useSafeAreaInsets().bottom` + `statusBarTranslucent`, so they work over
+  edge-to-edge content untouched.
 
 ### 4.6 Networking & offline UX
 

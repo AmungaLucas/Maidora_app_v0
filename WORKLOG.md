@@ -6,6 +6,83 @@
 
 ---
 
+## 2026-10-31 — KYC capture rebuild: one checklist + guided in-app camera + brand action sheet + edge-to-edge fix
+
+Owner walked the verification flow live: personal details → continue → "take
+the front photo of my ID" — and reported four interactivity issues: (1) the
+three capture items must live on ONE screen, not separate screens; (2) guided
+frames — a frame that fits the ID and an oval for the selfie — and the taken
+image must actually be cropped to that exact frame; (3) after taking a photo
+and pressing OK **the app restarts**; (4) the OS popup for permissions /
+"take photo, select from gallery" deserves a proper custom UI, as do all
+other popups; plus (5) the whole layout ran edge-to-edge — fix at root level,
+factoring in status bar, phone navigation bar and tabs.
+
+- **App restart on OK — ROOT CAUSE**: `launchCameraAsync` (expo-image-picker)
+  hands control to a *foreign* camera activity and then the `allowsEditing`
+  OS crop editor; in Expo Go the host activity gets killed/reloaded on the
+  return trip, so the app appears to restart after every capture. Fixed by
+  replacing the whole capture pipeline with an **in-app camera**: new
+  `GuidedCapture` modal on `expo-camera`'s `CameraView` (SDK 58 dep added,
+  `expo-camera@~58.0.14` + plugin entry in `app.json` for future EAS builds).
+  The app never leaves the foreground, so there is nothing to reload.
+- **Guided frames + exact crop**: `GuidedCapture` renders a scrim (SVG
+  evenodd hole) with a **rounded rect guide (16:10) for documents**, an
+  **oval (3:4) for the selfie**, a **circle for the profile photo**, gold
+  corner ticks on the rect, hint pill, torch toggle (docs), gallery button
+  (docs/avatar), brand shutter. On shutter, `frameCropForPhoto` maps the
+  on-screen frame from preview coords into photo pixels (CameraView previews
+  *cover* — the visible region is a centered rect of the preview aspect
+  inside the photo) and `cropToWebp` crops + downscales (≤1400/900/600 px)
+  + encodes WebP ~0.8. Gallery picks skip the OS editor (`allowsEditing:
+  false`) and center-crop to the same aspect, then pass the same confirm
+  stage (**Retake / Use photo**) — every accepted photo, camera or gallery,
+  fits the frame exactly.
+- **One capture screen**: new `KycCaptureScreen` (route `KycCapture`) lists
+  ID front + ID back (per doc type; passport hides the back, unknown type
+  keeps it so review can never be blocked by a hidden missing image) + live
+  selfie as cards with thumbnails and per-item status (Needed · Uploading ·
+  Upload failed → "Try upload again" keeps the local shot · Added). The old
+  `DocCaptureScreen`, `KycDocFrontScreen`, `KycDocBackScreen`,
+  `KycSelfieScreen` are **deleted**; flow is now 4 steps (personal → doc
+  type → photos → review), `KYC_STEPS`/`KYC_TOTAL_STEPS` renumbered, review
+  retakes navigate `KycCapture { focus, returnTo: 'KycReview' }` and land
+  straight in that item's capture. Uploads stay immediate
+  (`POST /media/kyc/:field`) so the server-draft resume contract is intact.
+- **Brand action sheet**: new `src/components/common/ActionSheet.js` (handle,
+  icon rows, sub-labels, cancel, `useSafeAreaInsets` bottom padding,
+  `statusBarTranslucent`) replaces the OS Alert chooser for "Add photo"
+  (take photo / choose from gallery) and drives the **profile photo** flow —
+  ProfileScreen now offers take photo (guided circle camera) or gallery
+  through the sheet instead of the raw gallery picker (old flow also hit the
+  restart bug). Camera-permission denial renders an inline explainer inside
+  the capture modal with an **Open phone settings** shortcut — no OS popups
+  anywhere in the flow.
+- **Edge-to-edge fix (root level)**: the KYC screens (`KycPersonal`,
+  `KycDocType`, `KycReview`, capture) rendered raw `<ScrollView>` roots and
+  sat under the status bar AND the Android navigation bar
+  (`edgeToEdgeEnabled: true`). All four now root in the safe-area `Screen`
+  wrapper (all-edges insets + 24 px padding). §4.5 gains the hard rule:
+  every screen roots in `Screen`, never a bare ScrollView.
+- **Validation**: `scripts/check_jsx.js` 16/16 (Babel parse of every touched
+  file) and NEW `scripts/smoke_kyc_capture.js` — 34/34: Babel-compiled
+  imports of all 11 touched modules (automatic JSX runtime + commonjs via
+  the app's own plugins), crop-math unit tests (cover-fit both directions,
+  degenerate → null fallback, center-crop, clamping, identity scale),
+  4-step constants, route-name integrity (no references to the deleted
+  routes), and first renders of KycCapture (fresh / passport / all-uploaded),
+  GuidedCapture (closed + permission explainer), KycReview, KycPersonal,
+  KycDocType, KycIntro, KycDone, ProfileScreen, ActionSheet and App.js via a
+  React-19 `internals.H` hook dispatcher. Two test-side math expectations
+  were corrected during authoring — the implementation's cover-fit mapping
+  was verified against the derivation (photo wider than preview → sides
+  cropped, `visW = photoW·(pa/qa)`), not the other way round.
+- **Owner test note**: Expo Go needs a JS reload after pulling this round
+  (new native-capable dep `expo-camera` is bundled in Go — no dev client
+  needed). First camera open triggers the OS camera-permission dialog once.
+
+---
+
 ## 2026-10-31 — Pricing table + media.maidora.co.ke pipeline + capture crash fix + admin spec
 
 Owner: pricing needs a **table** (prices change) · prepare the **admin

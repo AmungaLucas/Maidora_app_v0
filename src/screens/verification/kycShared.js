@@ -1,28 +1,38 @@
 // Shared plumbing for the KYC flow (§8 / MPS §33): shell layout, labels,
-// image capture + compression, and the draft object helpers. Draft data
-// travels between the KYC screens via navigation params and is autosaved
-// server-side (PUT /kyc/draft) so abandonment resumes from the banner.
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+// guided-capture crop math + compression, and the draft object helpers.
+// Draft data travels between the KYC screens via navigation params and is
+// autosaved server-side (PUT /kyc/draft) so abandonment resumes from the
+// banner.
+//
+// 2026-10-31 — capture rebuilt around ONE screen (KycCaptureScreen) with an
+// in-app guided camera (GuidedCapture). The old per-side screens + OS camera
+// intent were replaced because:
+//  - the three capture steps are now one checklist screen (owner request),
+//  - shots are cropped to the on-screen guide frame exactly (rect for IDs,
+//    oval for the selfie) instead of the free-form OS crop editor,
+//  - `launchCameraAsync` (a foreign activity + `allowsEditing` editor) was
+//    reloading Expo Go after every capture — the in-app CameraView never
+//    leaves the app, which also fixes the "app restarts on OK" bug.
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { API_BASE_URL, colors, radius } from '../../theme';
 import { ScreenHeader } from '../../ui';
 
+// Flow steps after the capture consolidation: personal details, document
+// type, the photos checklist (front + back + selfie on one screen), review.
 export const KYC_STEPS = {
   personal: 1,
   docType: 2,
-  front: 3,
-  back: 4,
-  selfie: 5,
-  review: 6,
+  photos: 3,
+  review: 4,
 };
-export const KYC_TOTAL_STEPS = 6;
+export const KYC_TOTAL_STEPS = 4;
 
 // Server field names (API + `kyc://field` markers) -> draft.images keys.
 // The draft keeps camelCase keys (emptyDraft below); every server touchpoint
 // (POST /media/kyc/:field, /kyc/images/:field, kyc:// markers) is snake_case.
-// DocCaptureScreen and KycReviewScreen map through this — mixing them up is
+// KycCaptureScreen and KycReviewScreen map through this — mixing them up is
 // exactly what silently hid remote images from the capture/review screens.
 export const IMG_KEY = {
   id_front: 'idFront',
@@ -107,15 +117,15 @@ export function formatDate(iso) {
   return d.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
-// ---- image capture ---------------------------------------------------------
-// v2 quality pipeline: crop (allowsEditing), downscale (≤1400 px documents /
-// ≤900 px selfie), encode WebP ~0.8. WebP roughly halves the upload size vs
-// JPEG at the same visual quality — faster uploads on Kenyan mobile data and
-// cheaper storage on the media subdomain. The server magic-byte sniffs every
-// upload anyway, so a device that falls back to JPEG still stores correctly
-// (extension follows the sniffed bytes, never the claimed mime). Blur/glare
-// ML detection lands with the EAS dev build (same deferral pattern as SMS
-// Retriever — zero-native layers ship today).
+// ---- guided capture / crop math --------------------------------------------
+// Quality pipeline v3 (guided frames): crop to the exact guide frame,
+// downscale (≤1400 px documents / ≤900 px selfie / ≤600 px avatar), encode
+// WebP ~0.8. WebP roughly halves the upload size vs JPEG at the same visual
+// quality — faster uploads on Kenyan mobile data and cheaper storage on the
+// media subdomain. The server magic-byte sniffs every upload anyway, so a
+// device that falls back to JPEG still stores correctly (extension follows
+// the sniffed bytes, never the claimed mime). Blur/glare ML detection lands
+// with the EAS dev build (same deferral pattern as SMS Retriever).
 
 export async function processToWebp(picked, maxW = 1400) {
   let ref = ImageManipulator.manipulate(picked.uri);
@@ -125,88 +135,86 @@ export async function processToWebp(picked, maxW = 1400) {
   return { uri: saved.uri, base64: saved.base64, mime: 'image/webp' };
 }
 
-// JPEG fallback retained for callers that specifically need JPEG.
-export async function processToJpeg(picked, maxW = 1400) {
+export function clampNum(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+// Map the guide-frame rect (measured in CAMERA PREVIEW coordinates) into the
+// coordinate space of the captured photo. CameraView previews 'cover': when
+// the photo's aspect differs from the preview's, the photo contains MORE
+// than what was on screen — the visible part is a centered rect of the
+// preview's aspect inside the photo. Expressing the frame in normalized
+// preview coordinates and scaling it into that visible region gives the
+// exact pixels the user saw inside the guide.
+export function frameCropForPhoto(frame, preview, photo) {
+  if (
+    !frame || !preview || !photo ||
+    !preview.width || !preview.height ||
+    !photo.width || !photo.height ||
+    !frame.width || !frame.height
+  ) {
+    return null;
+  }
+  const pa = preview.width / preview.height;
+  const qa = photo.width / photo.height;
+  let visW; let visH; let x0; let y0;
+  if (qa > pa) {
+    // Photo wider than preview → full height visible, sides cropped.
+    visH = photo.height;
+    visW = photo.width * (pa / qa);
+    x0 = (photo.width - visW) / 2;
+    y0 = 0;
+  } else {
+    // Photo taller than preview → full width visible, top/bottom cropped.
+    visW = photo.width;
+    visH = photo.height * (qa / pa);
+    x0 = 0;
+    y0 = (photo.height - visH) / 2;
+  }
+  const x = x0 + (frame.x / preview.width) * visW;
+  const y = y0 + (frame.y / preview.height) * visH;
+  const w = (frame.width / preview.width) * visW;
+  const h = (frame.height / preview.height) * visH;
+  if (![x, y, w, h].every(Number.isFinite) || w < 40 || h < 40) return null;
+  return {
+    originX: Math.round(clampNum(x, 0, photo.width - 1)),
+    originY: Math.round(clampNum(y, 0, photo.height - 1)),
+    width: Math.round(clampNum(w, 1, photo.width - x)),
+    height: Math.round(clampNum(h, 1, photo.height - y)),
+  };
+}
+
+// Fallback: largest centered rect with the given aspect inside the photo.
+// Used for gallery picks (no preview mapping exists) and whenever the
+// frame mapping degenerates.
+export function centerCropForAspect(photo, aspect) {
+  if (!photo || !photo.width || !photo.height || !aspect) return null;
+  const qa = photo.width / photo.height;
+  let w; let h;
+  if (qa > aspect) {
+    h = photo.height;
+    w = photo.height * aspect;
+  } else {
+    w = photo.width;
+    h = photo.width / aspect;
+  }
+  return {
+    originX: Math.round((photo.width - w) / 2),
+    originY: Math.round((photo.height - h) / 2),
+    width: Math.round(w),
+    height: Math.round(h),
+  };
+}
+
+// Crop (optional) → downscale → WebP. Returns { uri, base64, mime }.
+export async function cropToWebp(picked, crop, maxW = 1400) {
   let ref = ImageManipulator.manipulate(picked.uri);
-  if ((picked.width || 0) > maxW) ref.resize({ width: maxW });
+  if (crop && crop.width > 0 && crop.height > 0) ref = ref.crop(crop);
+  const w = crop ? crop.width : picked.width || 0;
+  if (w > maxW) ref = ref.resize({ width: maxW });
   const rendered = await ref.renderAsync();
-  const saved = await rendered.saveAsync({ compress: 0.78, format: SaveFormat.JPEG, base64: true });
-  return { uri: saved.uri, base64: saved.base64, mime: 'image/jpeg' };
-}
-
-async function ensureCameraPermission() {
-  const { granted, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
-  if (granted) return true;
-  Alert.alert(
-    'Camera needed',
-    canAskAgain
-      ? 'Allow Maidora to use your camera to capture your document.'
-      : 'Camera access is off for Maidora. Enable it in Settings to continue.'
-  );
-  return false;
-}
-
-async function ensureLibraryPermission() {
-  const { granted, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (granted) return true;
-  Alert.alert(
-    'Photos needed',
-    canAskAgain
-      ? 'Allow Maidora to access your photos to upload your document.'
-      : 'Photo access is off for Maidora. Enable it in Settings to continue.'
-  );
-  return false;
-}
-
-// Document capture: camera or gallery, cropped to an ID-card-ish frame.
-export async function captureDocument() {
-  return new Promise((resolve) => {
-    Alert.alert('Add photo', 'How would you like to add it?', [
-      {
-        text: 'Take photo',
-        onPress: async () => {
-          if (!(await ensureCameraPermission())) return resolve(null);
-          const r = await ImagePicker.launchCameraAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [16, 10],
-            quality: 0.85,
-          });
-          if (r.canceled || !r.assets?.length) return resolve(null);
-          resolve(await processToWebp(r.assets[0]));
-        },
-      },
-      {
-        text: 'Choose from gallery',
-        onPress: async () => {
-          if (!(await ensureLibraryPermission())) return resolve(null);
-          const r = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [16, 10],
-            quality: 0.85,
-          });
-          if (r.canceled || !r.assets?.length) return resolve(null);
-          resolve(await processToWebp(r.assets[0]));
-        },
-      },
-      { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-    ]);
-  });
-}
-
-// Selfie: live capture only (§33.1 step 6 — no gallery), front camera, square.
-export async function captureSelfie() {
-  if (!(await ensureCameraPermission())) return null;
-  const r = await ImagePicker.launchCameraAsync({
-    mediaTypes: ['images'],
-    cameraType: ImagePicker.CameraType.front,
-    allowsEditing: true,
-    aspect: [1, 1],
-    quality: 0.85,
-  });
-  if (r.canceled || !r.assets?.length) return null;
-  return processToWebp(r.assets[0], 900);
+  const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.WEBP, base64: true });
+  return { uri: saved.uri, base64: saved.base64, mime: 'image/webp' };
 }
 
 // ---- shell -----------------------------------------------------------------
@@ -291,27 +299,6 @@ export const s = StyleSheet.create({
   },
   optionTitle: { fontSize: 15, fontWeight: '700', color: colors.ink },
   optionBody: { fontSize: 12.5, color: colors.muted, marginTop: 2 },
-  // capture screen
-  captureFrame: {
-    flex: 1,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    padding: 20,
-    marginBottom: 16,
-  },
-  capturePreview: {
-    width: '100%',
-    height: '100%',
-    borderRadius: radius.md,
-  },
-  captureTitle: { fontSize: 16, fontWeight: '800', color: colors.ink, textAlign: 'center' },
-  captureBody: { fontSize: 13.5, color: colors.muted, textAlign: 'center', lineHeight: 20 },
   tipsCard: {
     backgroundColor: 'rgba(214, 166, 79, 0.12)',
     borderRadius: radius.md,

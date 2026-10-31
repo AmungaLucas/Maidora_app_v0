@@ -14,11 +14,9 @@
 import React, { useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { ROLES, colors, radius } from '../../theme';
-import { processToWebp } from '../verification/kycShared';
 import {
   Banner,
   BottomSheetModal,
@@ -28,6 +26,8 @@ import {
   TextField,
 } from '../../ui';
 import DrawerMenuButton from '../../components/common/DrawerMenuButton';
+import ActionSheet from '../../components/common/ActionSheet';
+import GuidedCapture from '../verification/GuidedCapture';
 import CompletenessWizard from './CompletenessWizard';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -42,6 +42,11 @@ export default function ProfileScreen({ navigation }) {
   const [savedNote, setSavedNote] = useState('');
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
+  // Avatar capture — brand ActionSheet chooser (take photo / gallery) plus
+  // the shared guided camera modal (circle frame, exact crop, WebP). No OS
+  // popups, no foreign camera activity (the old launchImageLibrary path).
+  const [avatarSheetOpen, setAvatarSheetOpen] = useState(false);
+  const [avatarCam, setAvatarCam] = useState(null); // { startWithGallery } | null
 
   const completeness = profileCompleteness;
   const hasProfileSection = isHousehelp || isEmployer;
@@ -67,30 +72,20 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
-  // §8/§13 media pipeline — profile photo: pick → square-crop → WebP ≤600 px
-  // → POST /media/avatar → public media.maidora.co.ke URL on users.avatar_url.
-  const pickAvatar = async () => {
+  // §8/§13 media pipeline — profile photo: guided capture (camera or
+  // gallery) → circle crop → WebP ≤600 px → POST /media/avatar → public
+  // media.maidora.co.ke URL on users.avatar_url.
+  const pickAvatar = () => {
     if (avatarBusy) return;
     setAvatarError('');
-    const { granted, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!granted) {
-      setAvatarError(
-        canAskAgain
-          ? 'Allow Maidora to access your photos to add a profile photo.'
-          : 'Photo access is off for Maidora. Enable it in Settings to add a photo.'
-      );
-      return;
-    }
-    const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-    });
-    if (r.canceled || !r.assets?.length) return;
+    setAvatarSheetOpen(true);
+  };
+
+  const onAvatarShot = async (shot) => {
+    if (!shot || avatarBusy) return;
     setAvatarBusy(true);
+    setAvatarError('');
     try {
-      const shot = await processToWebp(r.assets[0], 600);
       const res = await api.uploadAvatar(shot.base64, shot.mime, token);
       await updateUser({ avatarUrl: res.url });
     } catch (e) {
@@ -295,6 +290,37 @@ export default function ProfileScreen({ navigation }) {
         token={token}
         onSaved={onWizardSaved}
         onClose={() => setWizardOpen(false)}
+      />
+
+      {/* Avatar capture — brand chooser + guided circle camera (no OS popups) */}
+      <ActionSheet
+        visible={avatarSheetOpen}
+        title="Profile photo"
+        subtitle="How would you like to add it?"
+        onClose={() => setAvatarSheetOpen(false)}
+        options={[
+          {
+            key: 'camera',
+            icon: 'camera-outline',
+            label: 'Take photo',
+            sub: 'Center yourself in the circle guide',
+            onPress: () => setAvatarCam({ startWithGallery: false }),
+          },
+          {
+            key: 'gallery',
+            icon: 'images-outline',
+            label: 'Choose from gallery',
+            sub: 'Cropped to the circle automatically',
+            onPress: () => setAvatarCam({ startWithGallery: true }),
+          },
+        ]}
+      />
+      <GuidedCapture
+        visible={!!avatarCam}
+        mode="avatar"
+        startWithGallery={!!avatarCam?.startWithGallery}
+        onClose={() => setAvatarCam(null)}
+        onResult={onAvatarShot}
       />
 
       {/* Verification / Payments / Settings live in the DRAWER — hamburger

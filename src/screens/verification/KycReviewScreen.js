@@ -1,12 +1,13 @@
-// KYC step 6 — review (§33.1 step 7): every field and image, retake per
-// item (returns straight back here), then submit → /kyc/submit.
+// KYC step 4 — review (§33.1 step 7): every field and image, retake per
+// item (jumps straight into that item's guided capture on the unified
+// KycCapture screen, then returns here), then submit → /kyc/submit.
 import React, { useState } from 'react';
-import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
-import { Banner, PrimaryButton } from '../../ui';
+import { Banner, PrimaryButton, Screen } from '../../ui';
 import {
   ID_TYPE_LABELS,
   IMG_KEY,
@@ -39,8 +40,10 @@ export default function KycReviewScreen({ navigation, route }) {
     }
   }
 
-  function retake(target) {
-    navigation.navigate(target, { draft, returnTo: 'KycReview' });
+  function retake(field) {
+    // One capture screen for all items — focus opens that item's guided
+    // camera immediately, and returnTo jumps back here with the new shot.
+    navigation.navigate('KycCapture', { draft, returnTo: 'KycReview', focus: field });
   }
 
   const rows = [
@@ -56,15 +59,15 @@ export default function KycReviewScreen({ navigation, route }) {
   ];
 
   const images = [
-    { label: 'Document front', field: 'id_front', target: 'KycDocFront', thumb: ks.reviewThumb },
-    { label: 'Document back', field: 'id_back', target: 'KycDocBack', thumb: ks.reviewThumb },
-    { label: 'Selfie', field: 'selfie', target: 'KycSelfie', thumb: ks.reviewThumbSelfie },
+    { label: 'Document front', field: 'id_front', thumb: ks.reviewThumb },
+    { label: 'Document back', field: 'id_back', thumb: ks.reviewThumb },
+    { label: 'Selfie', field: 'selfie', thumb: ks.reviewThumbSelfie },
   ].filter((i) => i.field !== 'id_back' || draft.idType === 'national_id' || draft.images[IMG_KEY.id_back]);
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+    <Screen keyboard={false}>
       <KycShell
-        step={6}
+        step={4}
         title="Review your submission"
         subtitle="Check everything — retake any item before submitting"
       >
@@ -98,7 +101,7 @@ export default function KycReviewScreen({ navigation, route }) {
               <View style={ks.reviewImgRow}>
                 <Image source={kycImageSource(draft.images[IMG_KEY[img.field]], img.field, token)} style={img.thumb} resizeMode="cover" />
                 <Text style={[ks.reviewLabel, { flex: 1 }]}>{img.label}</Text>
-                <Pressable hitSlop={8} onPress={() => retake(img.target)}>
+                <Pressable hitSlop={8} onPress={() => retake(img.field)}>
                   <Text style={ks.retakeLink}>Retake</Text>
                 </Pressable>
               </View>
@@ -119,7 +122,7 @@ export default function KycReviewScreen({ navigation, route }) {
           submissions can permanently lose the Trust Badge.
         </Text>
       </KycShell>
-    </ScrollView>
+    </Screen>
   );
 }
 

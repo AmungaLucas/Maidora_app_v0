@@ -20,12 +20,12 @@
 //    label, forest fill + cream text + check when selected, tap again to
 //    un-select (withhold).
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
-import { Banner, PrimaryButton, TextField } from '../../ui';
+import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
 import DatePickerModal from '../../components/common/DatePickerModal';
 import {
   KycShell,
@@ -144,7 +144,7 @@ export default function KycPersonalScreen({ navigation, route }) {
         token
       );
       navigation.navigate(
-        draft.idType ? 'KycDocFront' : 'KycDocType',
+        draft.idType ? 'KycCapture' : 'KycDocType',
         { draft: { ...draft, fullNameAsOnId: trimmedName, idNumber: idNumber.trim(), dateOfBirth: dob, gender } }
       );
     } catch (e) {
@@ -161,7 +161,9 @@ export default function KycPersonalScreen({ navigation, route }) {
   ];
 
   return (
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+    // Screen = SafeAreaView + status-bar/nav-bar insets — the KYC screens
+    // used to render raw ScrollViews and sat edge-to-edge under both bars.
+    <Screen>
       <KycShell
         step={1}
         title="Personal details"
@@ -276,7 +278,7 @@ export default function KycPersonalScreen({ navigation, route }) {
           setDobPickerOpen(false);
         }}
       />
-    </ScrollView>
+    </Screen>
   );
 }
 

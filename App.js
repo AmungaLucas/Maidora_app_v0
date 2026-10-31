@@ -35,9 +35,7 @@ import PaymentScreen from './src/screens/payments/PaymentScreen';
 import KycIntroScreen from './src/screens/verification/KycIntroScreen';
 import KycPersonalScreen from './src/screens/verification/KycPersonalScreen';
 import KycDocTypeScreen from './src/screens/verification/KycDocTypeScreen';
-import KycDocFrontScreen from './src/screens/verification/KycDocFrontScreen';
-import KycDocBackScreen from './src/screens/verification/KycDocBackScreen';
-import KycSelfieScreen from './src/screens/verification/KycSelfieScreen';
+import KycCaptureScreen from './src/screens/verification/KycCaptureScreen';
 import KycReviewScreen from './src/screens/verification/KycReviewScreen';
 import KycDoneScreen from './src/screens/verification/KycDoneScreen';
 import { EmployerTabs, HousehelpTabs, tabsRouteFor } from './src/navigation/Tabs';
@@ -118,9 +116,9 @@ function RootNavigator() {
       <Stack.Screen name="KycIntro" component={KycIntroScreen} />
       <Stack.Screen name="KycPersonal" component={KycPersonalScreen} />
       <Stack.Screen name="KycDocType" component={KycDocTypeScreen} />
-      <Stack.Screen name="KycDocFront" component={KycDocFrontScreen} />
-      <Stack.Screen name="KycDocBack" component={KycDocBackScreen} />
-      <Stack.Screen name="KycSelfie" component={KycSelfieScreen} />
+      {/* Photos checklist — front + back + selfie on ONE screen with the
+          guided in-app camera (owner request 2026-10-31). */}
+      <Stack.Screen name="KycCapture" component={KycCaptureScreen} />
       <Stack.Screen name="KycReview" component={KycReviewScreen} />
       <Stack.Screen name="KycDone" component={KycDoneScreen} />
     </Stack.Navigator>

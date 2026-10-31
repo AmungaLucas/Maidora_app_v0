@@ -1,10 +1,10 @@
 // KYC step 2 — document type (§33.1 step 3). national_id is the default and
-// the only type that requires the back side (step 5 skipped otherwise).
+// the only type that requires the back side (the photos checklist shows the
+// back item only for national_id / drivers_license).
 import React, { useState } from 'react';
-import { ScrollView } from 'react-native';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
-import { Banner, PrimaryButton } from '../../ui';
+import { Banner, PrimaryButton, Screen } from '../../ui';
 import { KycShell, OptionCard, normalizeDraft } from './kycShared';
 
 const OPTIONS = [
@@ -40,7 +40,7 @@ export default function KycDocTypeScreen({ navigation, route }) {
     setBanner('');
     try {
       await api.kycSaveDraft({ idType }, token);
-      navigation.navigate('KycDocFront', { draft: { ...draft, idType } });
+      navigation.navigate('KycCapture', { draft: { ...draft, idType } });
     } catch (e) {
       setBanner(e.message || 'Could not save. Check your connection and try again.');
     } finally {
@@ -49,7 +49,7 @@ export default function KycDocTypeScreen({ navigation, route }) {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+    <Screen keyboard={false}>
       <KycShell
         step={2}
         title="Your document type"
@@ -68,6 +68,6 @@ export default function KycDocTypeScreen({ navigation, route }) {
         ))}
         <PrimaryButton title="Continue" onPress={onContinue} loading={busy} style={{ marginTop: 8 }} />
       </KycShell>
-    </ScrollView>
+    </Screen>
   );
 }
