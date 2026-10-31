@@ -57,12 +57,10 @@ export default function KycDocTypeScreen({ navigation, route }) {
   }
 
   return (
-    <Screen keyboard={false}>
+    <Screen edges={['left', 'right', 'bottom']}>
       <KycShell
         step={2}
-        title="Your document type"
         subtitle="What identity document will you use?"
-        navigation={navigation}
       >
         <Banner kind="error" message={banner} />
         {OPTIONS.map((o) => (

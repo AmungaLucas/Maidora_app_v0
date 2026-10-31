@@ -7,6 +7,15 @@
 // Custom drawerContent keeps the branded look (identity header, gold ring
 // avatar, item cards) that the previous in-house modal had.
 //
+// HEADER (reactnavigation.org/docs/drawer-navigator + /docs/header-buttons):
+// the drawer's own header is ON for every screen here — the hamburger lives
+// in `headerLeft` and calls navigation.openDrawer(), exactly the documented
+// drawer-in-header pattern. `screenOptions` as a FUNCTION receives each
+// screen's own navigation object (verified in @react-navigation/core
+// useDescriptors: options resolvers are invoked per route with that route's
+// navigation), so one definition covers all four drawer screens. Titles are
+// set per-screen with `options`.
+//
 // WIDTH BUG (2026-10-30): the width used to be `Math.min(320, 0.82)` — that
 // evaluates to 0.82 PIXELS, so the panel was sub-pixel wide and the drawer
 // looked dead (hamburger/swipe showed nothing). Width is now computed from
@@ -23,6 +32,7 @@ import ProfileScreen from '../screens/profile/ProfileScreen';
 import KycIntroScreen from '../screens/verification/KycIntroScreen';
 import PaymentScreen from '../screens/payments/PaymentScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import DrawerMenuButton from '../components/common/DrawerMenuButton';
 import { useApp } from '../context/AppContext';
 import { ROLES, colors, radius } from '../theme';
 
@@ -141,21 +151,31 @@ export default function ProfileDrawer() {
 
   return (
     <Drawer.Navigator
-      screenOptions={{
-        headerShown: false, // each screen renders its own branded header
+      screenOptions={({ navigation }) => ({
+        // Drawer-owned header: hamburger in headerLeft, per-screen titles.
+        headerShown: true,
+        headerLeft: () => <DrawerMenuButton navigation={navigation} />,
+        headerStyle: { backgroundColor: colors.cream },
+        headerShadowVisible: false,
+        headerTintColor: colors.forest,
+        headerTitleStyle: { fontWeight: '800', color: colors.ink },
         drawerType: 'front',
         drawerPosition: 'left',
         swipeEnabled: true,
         swipeEdgeWidth: 60,
         drawerStyle: { width: width, backgroundColor: colors.card },
         overlayColor: 'rgba(22, 38, 29, 0.45)',
-      }}
+      })}
       drawerContent={(props) => <BrandDrawerContent {...props} />}
     >
-      <Drawer.Screen name="ProfileMain" component={ProfileScreen} />
-      <Drawer.Screen name="Verification" component={KycIntroScreen} />
-      <Drawer.Screen name="Payments" component={PaymentScreen} />
-      <Drawer.Screen name="Settings" component={SettingsScreen} />
+      <Drawer.Screen name="ProfileMain" component={ProfileScreen} options={{ title: 'Profile' }} />
+      <Drawer.Screen
+        name="Verification"
+        component={KycIntroScreen}
+        options={{ title: 'Verification (Trust Badge)' }}
+      />
+      <Drawer.Screen name="Payments" component={PaymentScreen} options={{ title: 'Payments & receipts' }} />
+      <Drawer.Screen name="Settings" component={SettingsScreen} options={{ title: 'Account settings' }} />
     </Drawer.Navigator>
   );
 }

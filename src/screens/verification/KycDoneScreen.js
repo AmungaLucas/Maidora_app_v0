@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
-import { PrimaryButton, Screen, ScreenHeader } from '../../ui';
+import { PrimaryButton, Screen } from '../../ui';
 import { UrgentUpsell } from './KycIntroScreen';
 import { kycLog } from '../../kycLog';
 
@@ -19,8 +19,14 @@ export default function KycDoneScreen({ navigation, route }) {
   }, []);
 
   return (
+    // Terminal step — no navigator header (App.js headerShown: false): there
+    // is nothing to go back INTO once the submission is in. The heading below
+    // is plain content, not chrome.
     <Screen>
-      <ScreenHeader eyebrow="Identity verification" title="Submission received" />
+      <View style={styles.headWrap}>
+        <Text style={styles.headEyebrow}>Identity verification</Text>
+        <Text style={styles.headTitle}>Submission received</Text>
+      </View>
       <View style={styles.doneCard}>
         <View style={styles.doneIconWrap}>
           <Ionicons name="checkmark" size={34} color={colors.cream} />
@@ -47,6 +53,16 @@ export default function KycDoneScreen({ navigation, route }) {
 }
 
 const styles = {
+  headWrap: { marginTop: 18, marginBottom: 18 },
+  headEyebrow: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: colors.goldDark,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  headTitle: { fontSize: 24, fontWeight: '800', color: colors.ink },
   doneCard: {
     backgroundColor: colors.forest,
     borderRadius: radius.lg,

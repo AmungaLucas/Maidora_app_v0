@@ -28,7 +28,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
-import { Banner, PrimaryButton, Screen, ScreenHeader } from '../../ui';
+import { Banner, PrimaryButton, Screen } from '../../ui';
 import BrandLoader from '../../components/brand/BrandLoader';
 import { kycLog, kycStart } from '../../kycLog';
 import { REASON_LABELS, emptyDraft } from './kycShared';
@@ -130,13 +130,10 @@ export default function KycIntroScreen({ navigation }) {
   }
 
   return (
-    <Screen>
-      <ScreenHeader
-        eyebrow="Maidora Trust Badge"
-        title="Verify your identity"
-        subtitle="Free · Reviewed within 48–72 hours"
-        navigation={navigation}
-      />
+    <Screen edges={['left', 'right', 'bottom']}>
+      {/* Header — hamburger inside the drawer / back arrow on the root stack
+          (ProfileDrawer headerLeft · App.js native headers). */}
+      <Text style={styles.headerSub}>Free · Reviewed within 48–72 hours</Text>
 
       <View style={styles.badgeCard}>
         <View style={styles.badgeIconWrap}>
@@ -596,6 +593,7 @@ export function UrgentUpsell({ token, paid, onPaid }) {
 }
 
 const styles = StyleSheet.create({
+  headerSub: { fontSize: 14, lineHeight: 20, color: colors.muted, marginBottom: 12 },
   badgeCard: {
     backgroundColor: colors.forest,
     borderRadius: radius.lg,

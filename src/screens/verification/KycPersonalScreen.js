@@ -183,12 +183,11 @@ export default function KycPersonalScreen({ navigation, route }) {
   return (
     // Screen = SafeAreaView + status-bar/nav-bar insets — the KYC screens
     // used to render raw ScrollViews and sat edge-to-edge under both bars.
-    <Screen>
+    // Top inset is owned by the native-stack header (App.js).
+    <Screen edges={['left', 'right', 'bottom']}>
       <KycShell
         step={1}
-        title="Personal details"
         subtitle="Exactly as they appear on your ID"
-        navigation={navigation}
       >
         <Banner kind="error" message={banner} />
         <TextField

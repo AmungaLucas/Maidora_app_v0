@@ -79,12 +79,10 @@ export default function KycReviewScreen({ navigation, route }) {
   ].filter((i) => i.field !== 'id_back' || draft.idType === 'national_id' || draft.images[IMG_KEY.id_back]);
 
   return (
-    <Screen keyboard={false}>
+    <Screen edges={['left', 'right', 'bottom']}>
       <KycShell
         step={4}
-        title="Review your submission"
         subtitle="Check everything — retake any item before submitting"
-        navigation={navigation}
       >
         <Banner kind="error" message={banner} />
 

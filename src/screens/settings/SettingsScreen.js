@@ -5,9 +5,9 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
 import { LINKS, ROLES, colors, radius } from '../../theme';
-import { BottomSheetModal, Screen, ScreenHeader } from '../../ui';
+import { BottomSheetModal, Screen } from '../../ui';
 
-export default function SettingsScreen({ navigation }) {
+export default function SettingsScreen() {
   const { user, signOut } = useApp();
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -31,9 +31,9 @@ export default function SettingsScreen({ navigation }) {
   };
 
   return (
-    <Screen keyboard={false}>
-      {/* Header — hamburger inside the drawer, back arrow on the root stack. */}
-      <ScreenHeader navigation={navigation} title="Settings" />
+    <Screen keyboard={false} edges={['left', 'right', 'bottom']}>
+      {/* Header — hamburger inside the drawer / back arrow on the root stack
+          (ProfileDrawer headerLeft · App.js native headers). */}
 
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Account</Text>

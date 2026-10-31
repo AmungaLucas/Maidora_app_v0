@@ -18,7 +18,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { colors, radius } from '../../theme';
-import { ScreenHeader } from '../../ui';
 import { api } from '../../api';
 import { kycLog } from '../../kycLog';
 
@@ -288,7 +287,11 @@ export async function cropToWebp(picked, crop, maxW = 1400, flipH = false) {
 }
 
 // ---- shell -----------------------------------------------------------------
-export function KycShell({ step, title, subtitle, navigation, children }) {
+// Header chrome (back button + step title) lives on the native-stack header
+// (App.js `options.title` per KYC step — reactnavigation.org/docs/headers).
+// The shell keeps the flow chrome that ISN'T bar material: the step progress
+// bar and the one-line context subtitle.
+export function KycShell({ step, subtitle, children }) {
   return (
     <View style={s.flex}>
       <View style={s.progressWrap}>
@@ -297,9 +300,7 @@ export function KycShell({ step, title, subtitle, navigation, children }) {
         </View>
         <Text style={s.progressText}>Step {step} of {KYC_TOTAL_STEPS}</Text>
       </View>
-      {/* navigation → ScreenHeader renders the back arrow on the root stack
-          (owner rule: back button on every non-tab screen). */}
-      <ScreenHeader eyebrow="Identity verification" title={title} subtitle={subtitle} navigation={navigation} />
+      {subtitle ? <Text style={s.shellSubtitle}>{subtitle}</Text> : null}
       {children}
     </View>
   );
@@ -347,6 +348,7 @@ export const s = StyleSheet.create({
   },
   progressFill: { height: 6, borderRadius: radius.pill, backgroundColor: colors.forest },
   progressText: { fontSize: 12, color: colors.muted, alignSelf: 'flex-end' },
+  shellSubtitle: { fontSize: 14, lineHeight: 20, color: colors.muted, marginBottom: 14, marginTop: -4 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   infoText: { flex: 1, fontSize: 14, color: colors.ink, lineHeight: 20 },
   optionCard: {

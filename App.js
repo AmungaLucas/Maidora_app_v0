@@ -94,6 +94,17 @@ function RootNavigator() {
   else if (token && user) initialRoute = user.role ? tabsRouteFor(user) : 'RoleSelect';
   else if (onboardingComplete) initialRoute = 'Login';
 
+  // Headers (reactnavigation.org/docs/headers + /docs/header-buttons):
+  // every NON-tab screen shows the navigator's own branded bar — the back
+  // button is automatic in a stack navigator (it appears only when there is
+  // somewhere to go back to) and screens title themselves via `options`.
+  // Tab screens (EmployerTabs/HousehelpTabs) and chrome-less roots (Splash,
+  // Welcome, terminal KycDone) opt out with headerShown: false. Auth flow
+  // roots (Login post-logout, Otp with a pending registration, RoleSelect
+  // as the onboarding entry) keep the bar too — cream-on-cream it reads as
+  // quiet top spacing, and the SAME static config works for their pushed
+  // states (back chevron appears automatically).
+  //
   // KEY-REMOUNT ON AUTH FLIPS (logout fix, owner report 2026-10-31):
   // React Navigation ignores initialRouteName changes on an already-mounted
   // navigator, so signing out used to strand the UI on the tabs with no
@@ -107,30 +118,41 @@ function RootNavigator() {
     <Stack.Navigator
       key={authKey}
       initialRouteName={initialRoute}
-      screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+      screenOptions={{
+        headerShown: true,
+        headerStyle: { backgroundColor: colors.cream },
+        headerShadowVisible: false,
+        headerTintColor: colors.forest,
+        headerTitleStyle: { fontWeight: '800', color: colors.ink },
+        animation: 'slide_from_right',
+      }}
     >
-      <Stack.Screen name="Splash" component={SplashScreen} />
-      <Stack.Screen name="Welcome" component={WelcomeScreen} />
-      <Stack.Screen name="RoleSelect" component={RoleSelectScreen} />
-      <Stack.Screen name="Signup" component={SignupScreen} />
-      <Stack.Screen name="Otp" component={OtpScreen} />
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-      <Stack.Screen name="EmployerTabs" component={EmployerTabs} />
-      <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="Payment" component={PaymentScreen} />
+      <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="RoleSelect" component={RoleSelectScreen} options={{ title: '' }} />
+      <Stack.Screen name="Signup" component={SignupScreen} options={{ title: '' }} />
+      <Stack.Screen name="Otp" component={OtpScreen} options={{ title: '' }} />
+      <Stack.Screen name="Login" component={LoginScreen} options={{ title: '' }} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ title: '' }} />
+      <Stack.Screen name="EmployerTabs" component={EmployerTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Payment' }} />
       {/* KYC / trust badge (§8) — root-stack copies also open from the Home
-          banner; inside the Profile drawer the same screens render with a
-          hamburger header instead (ProfileDrawer). */}
-      <Stack.Screen name="KycIntro" component={KycIntroScreen} />
-      <Stack.Screen name="KycPersonal" component={KycPersonalScreen} />
-      <Stack.Screen name="KycDocType" component={KycDocTypeScreen} />
+          banner; inside the Profile drawer the same screens render under the
+          drawer's own hamburger header (ProfileDrawer). */}
+      <Stack.Screen name="KycIntro" component={KycIntroScreen} options={{ title: 'Trust Badge' }} />
+      <Stack.Screen name="KycPersonal" component={KycPersonalScreen} options={{ title: 'Personal details' }} />
+      <Stack.Screen name="KycDocType" component={KycDocTypeScreen} options={{ title: 'Your document type' }} />
       {/* Photos checklist — front + back + selfie on ONE screen with the
           guided in-app camera (owner request 2026-10-31). */}
-      <Stack.Screen name="KycCapture" component={KycCaptureScreen} />
-      <Stack.Screen name="KycReview" component={KycReviewScreen} />
-      <Stack.Screen name="KycDone" component={KycDoneScreen} />
+      <Stack.Screen name="KycCapture" component={KycCaptureScreen} options={{ title: 'Your photos' }} />
+      <Stack.Screen name="KycReview" component={KycReviewScreen} options={{ title: 'Review your submission' }} />
+      <Stack.Screen
+        name="KycDone"
+        component={KycDoneScreen}
+        options={{ headerShown: false }} // terminal — no back into a submitted flow
+      />
     </Stack.Navigator>
   );
 }

@@ -2,7 +2,8 @@
 // drawer, ProfileDrawer). Shared by both roles. Layout (owner redesign
 // 2026-10-30 — the old build crammed everything into stacked cards with the
 // wizard inline, which felt broken):
-//   1. Header — hamburger LEFT (the drawer opens from the left), "Profile".
+//   1. Header — the DRAWER's own header: hamburger LEFT (headerLeft →
+//      openDrawer, ProfileDrawer), title "Profile". No in-screen header.
 //   2. Identity card — avatar, name, role, phone, location.
 //   3. Profile strength card — REAL progress bar + %, missing chips, CTA.
 //      Tapping opens the multistep wizard FULL-SCREEN (CompletenessWizard
@@ -23,7 +24,6 @@ import {
   PrimaryButton,
   ProgressBar,
   Screen,
-  ScreenHeader,
   TextField,
 } from '../../ui';
 import ActionSheet from '../../components/common/ActionSheet';
@@ -96,11 +96,9 @@ export default function ProfileScreen({ navigation }) {
   };
 
   return (
-    <Screen keyboard={false} edges={['top', 'left', 'right']}>
-      {/* Header — hamburger lives IN the header (owner 2026-10-31): the shared
-          ScreenHeader shows the drawer hamburger here and a back arrow when
-          this screen stack-navigates outside the drawer. */}
-      <ScreenHeader navigation={navigation} title="Profile" />
+    <Screen keyboard={false} edges={['left', 'right']}>
+      {/* Header — hamburger + title live on the DRAWER's own header
+          (ProfileDrawer headerLeft → openDrawer). */}
 
       {/* 1 — Identity (tap the avatar to add/change the profile photo) */}
       <View style={styles.identityCard}>

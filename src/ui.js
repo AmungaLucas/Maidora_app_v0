@@ -13,10 +13,10 @@ import {
   View,
 } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
+import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import BrandLoader from './components/brand/BrandLoader';
-import DrawerMenuButton from './components/common/DrawerMenuButton';
 import { colors, radius } from './theme';
 
 // Screen — safe-area wrapper used by every screen.
@@ -60,8 +60,16 @@ export function Screen({ children, scroll = true, keyboard = true, style, edges 
   );
 }
 
+// Focus-aware status bar (reactnavigation.org/docs/status-bar — "Tabs and
+// drawer"): tab and drawer navigators keep several screens mounted at once,
+// so a bare <StatusBar> in every screen would race and the LAST mounted one
+// would win. Rendering it only while the screen is focused gives the bar to
+// whichever screen the user is actually looking at (e.g. the camera's
+// light-content bar over GuidedCapture's modal still wins on top).
 function StatusBarDark() {
   const { StatusBar } = require('expo-status-bar');
+  const isFocused = useIsFocused();
+  if (!isFocused) return null;
   return <StatusBar style="dark" />;
 }
 
@@ -237,51 +245,25 @@ export function BottomSheetModal({ visible, onClose, children }) {
   );
 }
 
-// ScreenHeader — the ONE branded header for every non-tab screen.
-// Left slot (owner rule 2026-10-31 — headers with a back button on ALL
-// non-tab screens):
-//   · inside the Profile drawer (navigation.openDrawer exists) → HAMBURGER
-//     (the drawer owns navigation there — there is nothing to go back to);
-//   · on a root-stack screen → BACK ARROW when the stack can go back
-//     (navigation.canGoBack()); first screens of a flow (e.g. Login as the
-//     post-logout root) render no back — there is nothing behind them;
-//   · `onBack` overrides the default goBack; `back={false}` hides it.
-// Pass `navigation` from the screen; title/subtitle/eyebrow/right stay
-// optional (auth screens use a back-only row and keep their in-content
-// titles).
-export function ScreenHeader({ eyebrow, title, subtitle, right, navigation, onBack, back }) {
-  const inDrawer = !!navigation && typeof navigation.openDrawer === 'function';
-  const canBack =
-    !inDrawer &&
-    !!navigation &&
-    (typeof navigation.canGoBack !== 'function' || navigation.canGoBack());
-  const showBack = back === true || (back !== false && (onBack || canBack));
-  const empty = !showBack && !inDrawer && !eyebrow && !title && !subtitle && !right;
-  if (empty) return null;
+// ScreenHeader — in-content heading for TAB screens (Home, Find Jobs,
+// Applications, My Jobs, Maids, Chats). Non-tab screens get their header
+// from the NAVIGATOR itself (reactnavigation.org/docs/headers): the root
+// native-stack shows branded bars with the automatic back button, and the
+// Profile drawer's own header carries the hamburger (headerLeft →
+// navigation.openDrawer()) — so this component is chrome-free by design:
+// eyebrow / title / subtitle / right slot only.
+export function ScreenHeader({ eyebrow, title, subtitle, right }) {
+  if (!eyebrow && !title && !subtitle && !right) return null;
   return (
     <View style={styles.headerWrap}>
       {eyebrow ? <Text style={styles.headerEyebrow}>{eyebrow}</Text> : null}
       <View style={styles.headerRow}>
-        {showBack ? (
-          <Pressable
-            style={styles.headerBtn}
-            hitSlop={8}
-            onPress={onBack || (() => navigation.goBack())}
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="arrow-back" size={22} color={colors.forest} />
-          </Pressable>
-        ) : inDrawer ? (
-          <DrawerMenuButton navigation={navigation} />
-        ) : null}
         {title || subtitle ? (
           <View style={{ flex: 1 }}>
             {title ? <Text style={styles.headerTitle}>{title}</Text> : null}
             {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
           </View>
-        ) : (
-          <View style={{ flex: 1 }} />
-        )}
+        ) : null}
         {right}
       </View>
     </View>
@@ -418,16 +400,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   headerTitle: { fontSize: 24, fontWeight: '800', color: colors.ink },
   headerSubtitle: { marginTop: 4, fontSize: 14, color: colors.muted, lineHeight: 20 },
   emptyWrap: {

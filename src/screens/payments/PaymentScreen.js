@@ -60,7 +60,7 @@ import FailMark from '../../components/brand/FailMark';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
-import { Banner, PrimaryButton, SecondaryButton, Screen, ScreenHeader, TextField } from '../../ui';
+import { Banner, PrimaryButton, SecondaryButton, Screen, TextField } from '../../ui';
 
 const AMOUNTS = [1, 50, 100, 200, 500];
 const POLL_MS = 4000;
@@ -496,13 +496,13 @@ export default function PaymentScreen({ navigation }) {
   const goHome = () => (inDrawer ? navigation.navigate('HomeTab') : navigation.goBack());
 
   return (
-    <Screen>
-      <ScreenHeader
-        eyebrow="M-Pesa · Live"
-        title="Pay with M-Pesa"
-        subtitle="STK Push via Safaricom Daraja. Real money moves — test with KES 1 first."
-        navigation={navigation}
-      />
+    <Screen edges={['left', 'right', 'bottom']}>
+      {/* Header — hamburger inside the drawer / back arrow on the root stack
+          (ProfileDrawer headerLeft · App.js native headers); the intro line
+          below keeps the STK-Push context that used to sit in the header. */}
+      <Text style={styles.payIntro}>
+        STK Push via Safaricom Daraja. Real money moves — test with KES 1 first.
+      </Text>
 
       <Banner message={error} />
 
@@ -746,6 +746,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   resumeTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  payIntro: { fontSize: 14, lineHeight: 20, color: colors.muted, marginBottom: 12 },
   resumeBody: { marginTop: 4, fontSize: 13, lineHeight: 18, color: colors.muted },
   resumeActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
   resumeBtn: { flex: 1 },

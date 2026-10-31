@@ -6,6 +6,75 @@
 
 ---
 
+## 2026-10-31 — Headers re-based on the OFFICIAL React Navigation implementation (owner: "read the docs")
+
+After the previous round shipped headers as **in-content chrome** (custom
+`ScreenHeader` rows with `headerShown: false` everywhere), the owner pointed
+at the official docs — reactnavigation.org/docs/headers, /docs/header-buttons,
+/docs/drawer-navigator, /docs/status-bar (#tabs-and-drawer) — "to see the
+implementation of headers and drawers". This round moves the app onto the
+documented patterns: **the navigator owns the header chrome; screens render
+none**.
+
+- **Root native-stack (App.js)** — `screenOptions` carry the branded bar
+  (cream `headerStyle`, `headerShadowVisible: false`, forest
+  `headerTintColor`, 800-weight ink `headerTitleStyle`, slide_from_right
+  kept) with `headerShown: true` DEFAULT. The **back button is automatic**
+  (docs: it appears only when there is somewhere to go back to — no
+  `canGoBack()` checks of ours anymore). Per-screen `options.title`:
+  Settings · Payment · Trust Badge · Personal details · Your document type ·
+  Your photos · Review your submission; auth screens get `title: ''` bars
+  (their big headings stay in the content). `headerShown: false` opt-outs:
+  Splash · Welcome · EmployerTabs · HousehelpTabs · terminal KycDone (no
+  back INTO a submitted flow — "Done" pops to top). The three flow roots
+  (Login post-logout, Otp with a pending registration, RoleSelect as the
+  onboarding entry) keep a static titleless bar — cream-on-cream it reads as
+  top spacing, and the SAME config serves their pushed states, which keeps
+  each screen's safe-area `edges` static.
+- **Profile drawer (ProfileDrawer.js)** — the drawer's OWN header is now on
+  for all four drawer screens, per /docs/drawer-navigator +
+  /docs/header-buttons: the hamburger lives in `headerLeft` and calls
+  `navigation.openDrawer()`; titles per `Drawer.Screen` (Profile ·
+  `Verification (Trust Badge)` · `Payments & receipts` · `Account settings`).
+  `screenOptions` is passed as a FUNCTION so each screen's own navigation is
+  captured — verified in the installed `@react-navigation/core`
+  `useDescriptors.js`: option resolvers are invoked per route with that
+  route's navigation object. (The drawer would otherwise inject its default
+  `DrawerToggleButton` — `DrawerView.js` does exactly that when
+  `headerLeft == null` — our branded `DrawerMenuButton` overrides it.)
+- **Screens lost their in-content chrome** — Profile/Settings/Payment/
+  KycIntro/KycDone rows and the 5 auth back-only rows removed; `KycShell`
+  keeps the progress bar + subtitle while the step title moved onto the bar;
+  `ScreenHeader` (ui.js) is now a chrome-free heading used ONLY by the six
+  tab screens (Home · Find Jobs · Applications · My Jobs · Maids · Chats —
+  tab screens never needed back buttons). Payment keeps the STK context as a
+  muted intro line; KycIntro keeps "Free · Reviewed within 48–72 hours";
+  KycDone (no bar, terminal) renders its heading as plain content.
+- **Safe areas** — every screen under a navigator header now passes
+  `edges` WITHOUT `'top'` (`Screen`): the header owns the status-bar inset,
+  so content can't double-pad. Screens without a bar (Splash · Welcome ·
+  KycDone · tabs) keep the top edge.
+- **Focus-aware StatusBar (docs/status-bar — "Tabs and drawer")** — `Screen`'s
+  dark `expo-status-bar` now renders only while the screen is focused
+  (`useIsFocused`): tab and drawer navigators keep 5 tab + 4 drawer screens
+  mounted at once and a bare `<StatusBar>` in each would race; the camera
+  modal's light bar over GuidedCapture still wins on top.
+
+Verification: Babel parse OK on all 20 touched/adjacent files
+(`node --check` cannot parse JSX); render-path simulations in
+`scripts/verify_headers_refactor.js` cover (A) per-route
+`screenOptions({ navigation })` resolution with `openDrawer` reachable from
+every drawer screen, (B) per-screen options overriding navigator defaults
+(headers on/off split, titles, animation surviving the merge), (C)
+ScreenHeader chrome-free rendering + empty→null, (D) KycShell progress/
+subtitle. On-device check: open Profile tab (bar + hamburger opens the
+drawer), drawer items (titles), Home banners → Settings/Payment/Trust Badge
+(bar + back), KYC steps (bar titles + back through the flow), login flow
+(bar appears once there is history), logout (still clean — signOut + keyed
+remount, untouched this round).
+
+---
+
 ## 2026-10-31 — Back-button headers everywhere + logout crash fix + interactive avatar crop editor (owner requests)
 
 Three owner directives in one round: "remember we are using react navigation —

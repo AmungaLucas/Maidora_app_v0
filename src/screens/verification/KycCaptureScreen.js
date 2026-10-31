@@ -173,12 +173,10 @@ export default function KycCaptureScreen({ navigation, route }) {
   }
 
   return (
-    <Screen keyboard={false}>
+    <Screen edges={['left', 'right', 'bottom']}>
       <KycShell
         step={3}
-        title="Your photos"
         subtitle="Front and back of your ID, then a live selfie — all in one place"
-        navigation={navigation}
       >
         <Banner kind="error" message={banner} />
 

@@ -18,7 +18,7 @@ import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { tabsRouteFor } from '../../navigation/Tabs';
 import { colors, radius } from '../../theme';
-import { Banner, PrimaryButton, Screen, ScreenHeader } from '../../ui';
+import { Banner, PrimaryButton, Screen } from '../../ui';
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 60;
@@ -115,10 +115,9 @@ export default function OtpScreen({ navigation }) {
   if (!pendingReg) return <Screen scroll={false} />;
 
   return (
-    <Screen>
-      {/* Back-only header row — the title stays in the content (ScreenHeader
-          hides the back arrow itself when the stack has nothing behind it). */}
-      <ScreenHeader navigation={navigation} />
+    <Screen edges={['left', 'right', 'bottom']}>
+      {/* Back button comes from the native-stack header (App.js); the title
+          stays in the content. */}
       <Text style={styles.title}>Verify your phone</Text>
       <Text style={styles.subtitle}>
         We sent a 6-digit code to{' '}
