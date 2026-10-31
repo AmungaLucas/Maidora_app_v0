@@ -6,6 +6,52 @@
 
 ---
 
+## 2026-11-01 — SPLIT: separate role homescreens — `src/screens/home/EmployerHomeScreen.js` + `MaidHomeScreen.js` (owner request)
+
+Owner: "can we seperate maids homescreen and employers homescreen.... src\screens\home\**".
+
+**What changed.** The one role-conditional `HomeScreen.js` (592 lines: a single
+`isEmployer ? … : …` inside one component) is gone. `src/screens/home/` now
+holds three files:
+
+- **`EmployerHomeScreen.js`** — the hiring household's hub: hero (Browse
+  Maids / Post a Job), Your postings, FEATURED MAIDS · MAIDS NEAR ME ·
+  VERIFIED · TOP RATED (one `/maids/rails` call), employer footnote. Stats
+  row stays REMOVED.
+- **`MaidHomeScreen.js`** — the househelp hub: hero (Find Jobs), §24.1
+  credits pill, §15.5 boost strip (featured / activate banked / buy),
+  FEATURED JOBS · JOBS NEAR ME · RECENTLY POSTED (one `/jobs/rails` call),
+  maid footnote.
+- **`shared.js`** — what both hubs share so they can't drift apart silently:
+  greeting header (real avatar photo), §7 completeness banner, §8 KYC banner,
+  MaidRail/JobRail (skeletons included), hub stylesheet, and the focus
+  session re-sync extracted as the `useSessionResync()` hook (loop-guard
+  preserved: deps track token + role, never the user snapshot).
+
+**Wiring.** `Tabs.js` mounts `MaidHomeScreen` inside `HousehelpTabs` and
+`EmployerHomeScreen` inside `EmployerTabs`; the route name stays `HomeTab` in
+both navigators, so `navigate('HomeTab')` (e.g. PaymentScreen's go-home)
+keeps working unchanged. Each hub now owns only its role's cached resources
+(`enabled: role === '…' && !!token` guard kept as insurance for the session
+flip instant) — no more dead `isEmployer` branches evaluating per render.
+
+**Quiet fix riding along.** MaidRail/JobRail used to be defined INSIDE the
+render body — a new component identity every render, which remounts the
+whole rail subtree and restarts the skeleton pulse on each parent render.
+They are module-level components now (navigation passed as a prop).
+
+**Zero behavior change intended**: section copy, order, styles, cache keys,
+focus-refresh semantics, boost flows — all carried over verbatim (the maid
+hero pill deliberately kept full-width stretch, exactly as before).
+
+**Validation.** Babel-parse green on all four files; zero leftover
+`screens/home/HomeScreen` references; full Metro export compiles (4.5 MB
+Hermes bundle) and both hubs' content verified inside the bytecode — gotcha
+for future greps: strings containing `—` are stored UTF-16 in Hermes, so
+`rg` misses them in ASCII mode ("Boosted placement" is there, as UTF-16LE).
+
+---
+
 ## 2026-11-01 — v10: JOB BOOST (featured jobs on the maid home) · cached hubs + skeleton loaders · stats row removed · maid-detail stars + distance km (owner request)
 
 Owner: "check the initial deliberations documentation on the logics behind the placement also lets design good uis for the homescreen and the maids details. also have cache and skeletal loaders · remove the stats section from homescreen · lets introduce job boost so it can feature on maids homescreen · for maids homescreen we can have featured jobs., recently posted, etc · for maids detail screen we need to have distance in km, star rating etc".

@@ -7,7 +7,8 @@ import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-import HomeScreen from '../screens/home/HomeScreen';
+import EmployerHomeScreen from '../screens/home/EmployerHomeScreen';
+import MaidHomeScreen from '../screens/home/MaidHomeScreen';
 import FindJobsScreen from '../screens/maid/FindJobsScreen';
 import ApplicationsScreen from '../screens/maid/ApplicationsScreen';
 import MyJobsScreen from '../screens/employer/MyJobsScreen';
@@ -51,7 +52,7 @@ export function HousehelpTabs() {
     <HousehelpTabsNav.Navigator screenOptions={TAB_BAR}>
       <HousehelpTabsNav.Screen
         name="HomeTab"
-        component={HomeScreen}
+        component={MaidHomeScreen}
         options={{ title: 'Home', tabBarIcon: ({ focused }) => icon('home', focused) }}
       />
       <HousehelpTabsNav.Screen
@@ -83,7 +84,7 @@ export function EmployerTabs() {
     <EmployerTabsNav.Navigator screenOptions={TAB_BAR}>
       <EmployerTabsNav.Screen
         name="HomeTab"
-        component={HomeScreen}
+        component={EmployerHomeScreen}
         options={{ title: 'Home', tabBarIcon: ({ focused }) => icon('home', focused) }}
       />
       <EmployerTabsNav.Screen
