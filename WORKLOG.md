@@ -6,6 +6,49 @@
 
 ---
 
+## 2026-10-31 — Payment UX: staged progress tracker + callback race hardening
+
+Owner logs #30–#34 all healthy: rc=1 (insufficient balance) and rc=1037
+(expired) surfaced cleanly with single end-logs, three receipts banked
+(`UJV6N0BGAA`, `UJV6N0BJE8`, `UJV6N0BHYH`). Owner asked for two UX changes —
+drop the full-screen loader for a button state, and show real processing
+stages. Delivered, plus one reliability fix the trace itself exposed.
+
+- **App — no more full-screen veil**: `PaymentScreen` no longer mounts
+  `FullScreenLoader` between the tap and the status card; the
+  PrimaryButton's own radar + "Sending push…" carries the wait (gateway
+  route work is single-digit ms — payment #32's 28 s call was pure mobile
+  network, so a full-screen blackout during a hiccup only read as a freeze).
+  Amount chips disabled while starting.
+- **App — staged progress card**: pending/failed/success cards now share a
+  4-step tracker (connector rails, radar on the active step) driven by REAL
+  events, not timers: ① Payment accepted by gateway (respond-first row) →
+  ② Prompt sent to your phone (row carries `checkout_request_id`, i.e.
+  Daraja accepted — `paymentView` already exposes it, seen on the next poll)
+  → ③ Enter your M-Pesa PIN (elapsed timer lives here) → ④ Payment
+  confirmed (receipt chip). A push rejection (e.g. 4999 existing USSD
+  session) fails at ②; PIN timeout/cancel/low balance fails at ③ — the ✗
+  lands on the stage that actually died. Card crossfade retained.
+- **Gateway — callback race hardening (found in the #32 trace)**: the
+  background write of `checkout_request_id` took **13.4 s** (MySQL stall on
+  the shared host; Daraja had accepted at t+2.2 s) and the callback matches
+  rows by `checkout_request_id` — a callback inside that window would match
+  0 rows, and Safaricom never retries, so the receipt would be lost.
+  Settlement extracted into `settleByCheckoutId`; first attempt inline, an
+  unmatched callback is retried in the background every 2.5 s × 24 (~60 s)
+  while the ACK returns immediately. Residual risk (documented in §6.3): a
+  gateway restart inside the retry window — the 150 s query path still
+  settles (without receipt).
+- **Verification**: gateway E2E 11/11 (`scripts/deploy_mpesa_staged_ui.py`)
+  incl. a real race proof — row inserted without `checkout_request_id`,
+  callback fired first (warn + retries), late row write simulated →
+  "late row write matched on retry #2" → row `success|0|RACE…T` with
+  receipt. Latency re-probe after the refactor: responds back to 4–71 ms
+  server-side (E2E row #35's one-off 7.8 s respond was a restart-moment
+  artifact seconds after `touch restart.txt`, not a regression).
+
+---
+
 ## 2026-10-30 — M-Pesa polish: smooth loader crossfade + per-purpose STK labels
 
 Owner logs confirmed the respond-first fix end to end (payment #16 success,

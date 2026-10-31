@@ -2,7 +2,7 @@
 
 > **Living document.** Every working session must keep this file and
 > `WORKLOG.md` in sync with reality (in the same commit). Section 11 defines
-> the rule. Last updated: **2026-10-30**.
+> the rule. Last updated: **2026-10-31**.
 
 Maidora Kenya ("Trusted help for your household") is a two-sided marketplace
 connecting households (employers) with house helps across Kenya. This repo
@@ -27,11 +27,11 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Disposable email block (§12) | ✅ LIVE | signup + email-verification re-check |
 | Email verification path (§2/§5, nodemailer SMTP) | ✅ LIVE | `SMTP_PASS` installed + SMTP auth verified (2026-10-29); Profile email sheet live: `POST /auth/update-email` + code entry (2026-10-29) |
 | Profile completeness §7 — BOTH roles (schema v4) | ✅ LIVE | maid: `maid_profiles` 6 checks (bio added); employer: `employer_profiles` (size/children/budget); role-aware `GET/PUT /api/profile` — **partial per-step saves both roles**; MULTISTEP wizard rebuilt as a FULL-SCREEN modal (progress header with % + tappable step chips, keyboard-safe, sticky save bar); HomeScreen banner FIRST then KYC (both roles) and updates instantly via shared AppContext snapshot; 3-step DOB picker |
-| M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven; **respond-first since 2026-10-30** — stk-push answers in <1 s (row → paymentId → background Daraja push), killing the "fetch has been cancelled / prompt arrives anyway" race; every stage traced with `[MPESA]` lines in `stderr.log`; app polls + adopts pending rows on client timeout. **Per-purpose STK labels 2026-10-30** — `PURPOSE_STK` map (§6.1) sends AccountReference/TransactionDesc per purpose (`app_test`→TEST/"Test payment", `kyc_urgent`→KYCURGENT/"Urgent KYC", §9 product slots pre-mapped); BuyGoods (till) prompts show only the business name — the reference lands on the confirmation SMS + statement. **Hardening round 2 2026-10-30** — OAuth in-flight dedupe (one shared token fetch — two concurrent pushes used to race); app poll-overlap guard (no double end-logs on slow networks); global `req.t0` middleware + `t+Xms after request start` in the push log so client-vs-server latency attribution is provable (9.4 s push call = mobile network, server route work 5 ms) |
+| M-Pesa STK Push → callback → receipt | ✅ LIVE | Real KES 1 txn succeeded (receipt `UJS6N01T1A`); callback round-trip proven; **respond-first since 2026-10-30** — stk-push answers in <1 s (row → paymentId → background Daraja push), killing the "fetch has been cancelled / prompt arrives anyway" race; every stage traced with `[MPESA]` lines in `stderr.log`; app polls + adopts pending rows on client timeout. **Per-purpose STK labels 2026-10-30** — `PURPOSE_STK` map (§6.1) sends AccountReference/TransactionDesc per purpose (`app_test`→TEST/"Test payment", `kyc_urgent`→KYCURGENT/"Urgent KYC", §9 product slots pre-mapped); BuyGoods (till) prompts show only the business name — the reference lands on the confirmation SMS + statement. **Hardening round 2 2026-10-30** — OAuth in-flight dedupe (one shared token fetch — two concurrent pushes used to race); app poll-overlap guard (no double end-logs on slow networks); global `req.t0` middleware + `t+Xms after request start` in the push log so client-vs-server latency attribution is provable (9.4 s push call = mobile network, server route work 5 ms). **Callback race hardening 2026-10-31** — the background `checkout_request_id` write can lag on the shared host (observed 13.4 s on #32 while Daraja accepted at t+2.2 s); an unmatched callback is now retried in the background (2.5 s × 24) while the ACK returns immediately — receipt can no longer be lost (§6.3; E2E 11/11 incl. race proof) |
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
 | App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
-| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **smooth state transitions 2026-10-30** — FullScreenLoader now fades OUT before its Modal unmounts (RN Modal kills the window instantly, so the old exit fade never played) and the status card crossfades in (opacity + 18 px rise; replays on pending→success/failed) |
+| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending/failed/success cards share a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN [elapsed timer] → confirmed [receipt chip]); a push rejection fails at stage 2, a PIN/settlement failure at stage 3. **No more full-screen veil** — the button's own radar + "Sending push…" carries the wait (gateway answers in single-digit ms; #32's 28 s was mobile network); card crossfade (opacity + 18 px rise) retained |
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
@@ -291,6 +291,12 @@ TransactionDesc from the `PURPOSE_STK` map — purpose → ≤12-char alnum ref 
 "Urgent KYC"**) → persist `checkout_request_id` → app starts polling. Daraja
 refuses → row marked `failed` with the reason.
 
+The row's `checkout_request_id` doubles as the client's **stage-2 signal**:
+`paymentView` always exposes it, `null` until Daraja accepts (the background
+write can lag seconds on the loaded host — that is exactly what the
+§6.3 retry covers). The app's staged tracker ticks "Prompt sent to your
+phone" only when it becomes non-null, so no stage is cosmetic.
+
 ### 6.2 Settlement policy — **the callback is the single source of truth**
 
 The STK **query** API returns misleading results for in-flight prompts
@@ -318,6 +324,17 @@ conventions**: `{"ResponseCode":"0","ResponseDescription":"Accepted",
 finds its expected pair, so it never retries. Unknown checkout IDs and
 malformed payloads are logged, still ACKed.
 
+**Unmatched ≠ lost (2026-10-31).** The settlement is extracted into
+`settleByCheckoutId`; the first attempt runs inline before the ACK, and if
+it matches 0 rows (callback raced the lagging background write — observed
+13.4 s on #32) the **same settlement is retried in the background every
+2.5 s for up to 24 attempts (~60 s)**. Residual risk: a gateway restart
+inside the retry window — the §6.2 150 s query path still settles the row
+(without the receipt number). E2E-proven live: `scripts/deploy_mpesa_staged_ui.py`
+inserts a row without `checkout_request_id`, fires the callback (warn +
+retries), simulates the late write → `late row write matched on retry #2`
+→ row settled with receipt.
+
 ### 6.4 Client polling (`PaymentScreen.js`)
 
 - Every **4 s for 52 polls (~3.5 min)**, always `refresh=1` (server decides
@@ -328,6 +345,14 @@ malformed payloads are logged, still ACKed.
   the callback's receipt replaces *"Confirming…"*.
 - Failure → human sentences keyed by `result_code`: 1 insufficient balance ·
   1032 cancelled · 1037 expired · 2001 wrong PIN.
+- **Staged progress card (2026-10-31)**: pending/failed/success share one
+  4-step tracker — ① Payment accepted by gateway (row exists) ② Prompt sent
+  to your phone (`checkoutRequestId` non-null) ③ Enter your M-Pesa PIN
+  (elapsed timer) ④ Payment confirmed (receipt chip); failures mark the
+  stage that died. No full-screen veil between the button and the card —
+  the PrimaryButton's radar loading state carries the push call; ticks skip
+  while one is in flight and `doneRef` swallows stray ticks (one end-log,
+  always).
 
 ### 6.5 Test practices
 

@@ -1,9 +1,24 @@
 // M-Pesa payment — live STK Push against the Daraja production gateway.
-// Flow: choose amount -> confirm phone -> "Send push" -> the prompt lands on
-// the phone -> user enters their M-Pesa PIN -> the SAFARICOM CALLBACK settles
-// the payment (source of truth; the gateway only uses the Daraja query API
-// to confirm success early, never to fail an in-flight prompt) -> success
-// shows the M-Pesa receipt code.
+// Flow: choose amount -> "Send STK Push" (the button itself spins — no
+// full-screen veil; the gateway answers in milliseconds and a blackout
+// during a network hiccup reads as a freeze) -> the staged progress card
+// crossfades in -> the user keys their M-Pesa PIN -> the SAFARICOM CALLBACK
+// settles the payment (source of truth; the gateway only uses the Daraja
+// query API to confirm success early, never to fail an in-flight prompt)
+// -> the receipt code lands on stage 4.
+//
+// The progress card is a truthful step tracker driven by REAL events, not
+// cosmetic timers:
+//   1. Payment accepted by gateway   — always done once the card shows
+//                                      (respond-first: the row exists).
+//   2. Prompt sent to your phone     — done when the row carries a
+//                                      checkout_request_id (Daraja accepted
+//                                      the push, seen on the next poll).
+//   3. Enter your M-Pesa PIN         — the long wait; elapsed timer lives
+//                                      on this step.
+//   4. Payment confirmed             — receipt chip appears here.
+// A push rejection (e.g. an existing USSD session) fails at stage 2; a
+// PIN timeout / cancellation / low balance fails at stage 3.
 //
 // Timing: STK prompts regularly take 30-60s+ for the user to key their PIN,
 // so polling runs every 4s for up to ~3.5 minutes, and a little longer after
@@ -11,11 +26,9 @@
 // auto-checking the payment is left PENDING (never "failed") with a Keep
 // Checking action.
 //
-// The gateway answers stk-push IMMEDIATELY (respond-first) and fires the
-// Daraja push in the background, so the initial call is fast; if the call
-// still times out (offline / old gateway / network flap) we ADOPT the most
-// recent pending payment row instead of dead-ending — the row is created
-// server-side before the push, so it almost always exists.
+// If the push call itself times out (offline / old gateway / network flap)
+// we ADOPT the most recent pending payment row instead of dead-ending — the
+// row is created server-side before the push, so it almost always exists.
 //
 // Every step of the journey logs a [MPESA] line (start → push → poll ticks →
 // settlement → receipt) so the whole flow can be traced from the console.
@@ -23,7 +36,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BrandLoader from '../../components/brand/BrandLoader';
-import FullScreenLoader from '../../components/brand/FullScreenLoader';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
@@ -54,6 +66,33 @@ function friendlyFailure(payment) {
 
 const log = (...a) => console.log('[MPESA]', ...a);
 
+// One row of the staged progress tracker. State: done | active | todo | failed.
+// A thin rail connects the icons so the list reads as one journey.
+function StepRow({ state, title, sub, last }) {
+  return (
+    <View style={styles.stepRow}>
+      <View style={styles.stepIconCol}>
+        {state === 'done' ? (
+          <Ionicons name="checkmark-circle" size={22} color={colors.brand} />
+        ) : state === 'active' ? (
+          <BrandLoader variant="radar" size={22} color={colors.brandSoft} />
+        ) : state === 'failed' ? (
+          <Ionicons name="close-circle" size={22} color={colors.danger} />
+        ) : (
+          <Ionicons name="ellipse-outline" size={20} color={colors.line} />
+        )}
+        {!last ? <View style={styles.stepRail} /> : null}
+      </View>
+      <View style={[styles.stepText, !last && styles.stepTextSpaced]}>
+        <Text style={[styles.stepTitle, state === 'todo' && styles.stepTitleTodo, state === 'failed' && { color: colors.danger }]}>
+          {title}
+        </Text>
+        {sub ? <Text style={styles.stepSub}>{sub}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 export default function PaymentScreen({ navigation }) {
   const { user, token } = useApp();
   const [amount, setAmount] = useState(1);
@@ -61,7 +100,7 @@ export default function PaymentScreen({ navigation }) {
   const [phoneError, setPhoneError] = useState('');
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
-  const [payment, setPayment] = useState(null); // { id, status, mpesaReceipt, resultDesc, phone }
+  const [payment, setPayment] = useState(null); // { id, status, mpesaReceipt, resultDesc, phone, checkoutRequestId }
   const [elapsed, setElapsed] = useState(0);
   const [stopped, setStopped] = useState(false); // stopped auto-checking while still pending
   const pollRef = useRef({ timerId: null, n: 0 });
@@ -69,10 +108,9 @@ export default function PaymentScreen({ navigation }) {
   const doneRef = useRef(false); // flow ended — swallow any stray queued tick
   const elapsedRef = useRef(null);
 
-  // Entrance animation for the status card: the full-screen "Sending push"
-  // loader fades out while this card fades in and rises — a real crossfade
-  // instead of a hard cut. Replays when the status flips (pending →
-  // success / failed) so every state change lands smoothly.
+  // Entrance animation for the status card: it fades in and rises — a real
+  // crossfade with the button returning to idle. Replays when the status
+  // flips (pending → success / failed) so every state change lands smoothly.
   const cardAnim = useRef(new Animated.Value(0)).current;
   const statusKey = payment ? payment.status : '';
   useEffect(() => {
@@ -247,13 +285,62 @@ export default function PaymentScreen({ navigation }) {
   };
 
   const pending = payment?.status === 'pending';
+  // The push is accepted once the row carries a checkout_request_id (written
+  // by the gateway right after Daraja accepts — visible on the next poll).
+  const pushSent = !!(payment && payment.checkoutRequestId);
   // Inside the Profile drawer → hamburger + HomeTab exit; root-stack copy → goBack.
   const inDrawer = typeof navigation.openDrawer === 'function';
 
+  // Staged tracker rows for each card state — every stage maps to a real
+  // event (row created / Daraja accepted / PIN / callback settlement).
+  const stageRows = (() => {
+    const accepted = {
+      title: 'Payment accepted by gateway',
+      sub: payment ? `KES ${amount} · payment #${payment.id}` : null,
+      state: 'done',
+    };
+    const prompt = (state, sub) => ({
+      title: 'Prompt sent to your phone',
+      sub: sub !== undefined ? sub : `STK request to ${(payment && payment.phone) || phone}`,
+      state,
+    });
+    const pin = (state, sub) => ({
+      title: 'Enter your M-Pesa PIN',
+      sub: sub !== undefined ? sub : `Waiting for confirmation · ${elapsed}s`,
+      state,
+    });
+    const confirmed = (state, sub) => ({
+      title: 'Payment confirmed',
+      sub: sub !== undefined ? sub : 'M-Pesa receipt appears here',
+      state,
+    });
+    if (pending) {
+      return [
+        accepted,
+        prompt(pushSent ? 'done' : 'active'),
+        pin(pushSent ? 'active' : 'todo'),
+        confirmed('todo'),
+      ];
+    }
+    if (payment && payment.status === 'failed') {
+      // No checkout_request_id -> Daraja never accepted the push (stage 2);
+      // otherwise the PIN request itself failed (stage 3).
+      const failedAtPrompt = !pushSent;
+      return [
+        accepted,
+        prompt(failedAtPrompt ? 'failed' : 'done', failedAtPrompt ? 'The prompt could not be sent' : undefined),
+        pin(failedAtPrompt ? 'todo' : 'failed', failedAtPrompt ? undefined : 'The PIN request failed'),
+        confirmed('todo', 'Not reached'),
+      ];
+    }
+    if (payment && payment.status === 'success') {
+      return [accepted, prompt('done'), pin('done', 'PIN approved'), confirmed('done')];
+    }
+    return [];
+  })();
+
   return (
     <Screen>
-      <FullScreenLoader visible={starting} label="Sending push" theme="dark" />
-
       <ScreenHeader
         eyebrow="M-Pesa · Live"
         title="Pay with M-Pesa"
@@ -265,11 +352,12 @@ export default function PaymentScreen({ navigation }) {
 
       {payment && payment.status === 'success' ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.brandSoft }, cardStyle]}>
-          <Ionicons name="checkmark-circle" size={46} color={colors.brandSoft} />
           <Text style={styles.statusTitle}>Payment received</Text>
-          <Text style={styles.statusBody}>
-            KES {amount} via M-Pesa — asante! Your payment is confirmed.
-          </Text>
+          <View style={styles.steps}>
+            {stageRows.map((s, i) => (
+              <StepRow key={s.title} {...s} last={i === stageRows.length - 1} />
+            ))}
+          </View>
           <View style={styles.receiptChip}>
             <Text style={styles.receiptLabel}>M-Pesa receipt</Text>
             <Text style={styles.receiptValue}>{payment.mpesaReceipt || 'Confirming…'}</Text>
@@ -282,8 +370,12 @@ export default function PaymentScreen({ navigation }) {
         </Animated.View>
       ) : payment && payment.status === 'failed' ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.danger }, cardStyle]}>
-          <Ionicons name="close-circle" size={46} color={colors.danger} />
           <Text style={styles.statusTitle}>Payment not completed</Text>
+          <View style={styles.steps}>
+            {stageRows.map((s, i) => (
+              <StepRow key={s.title} {...s} last={i === stageRows.length - 1} />
+            ))}
+          </View>
           <Text style={styles.statusBody}>{friendlyFailure(payment)}</Text>
           <Text style={styles.statusNote}>
             Nothing is charged for unapproved requests. Send a new push whenever you are ready.
@@ -292,18 +384,15 @@ export default function PaymentScreen({ navigation }) {
         </Animated.View>
       ) : payment && pending ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.gold }, cardStyle]}>
-          <BrandLoader variant="radar" size={92} color={colors.brandSoft} />
-          <Text style={styles.statusTitle}>Check your phone</Text>
-          <Text style={styles.statusBody}>
-            An M-Pesa prompt for KES {amount} was sent to {payment.phone || phone}. Enter your
-            M-Pesa PIN to approve it.
-          </Text>
-          <Text style={styles.statusHint}>
-            Waiting for confirmation · {elapsed}s{stopped ? '' : ' — keep this screen open'}
-          </Text>
+          <Text style={styles.statusTitle}>Processing payment</Text>
+          <View style={styles.steps}>
+            {stageRows.map((s, i) => (
+              <StepRow key={s.title} {...s} last={i === stageRows.length - 1} />
+            ))}
+          </View>
           <Text style={styles.statusNote}>
             The prompt can take a few seconds to reach your phone, and up to a minute on busy
-            networks. You have about 3 minutes to enter your PIN.
+            networks. You have about 3 minutes to enter your PIN — keep this screen open.
           </Text>
           {stopped ? (
             <>
@@ -331,6 +420,7 @@ export default function PaymentScreen({ navigation }) {
               <Pressable
                 key={a}
                 onPress={() => setAmount(a)}
+                disabled={starting}
                 style={[styles.chip, amount === a && styles.chipActive]}
               >
                 <Text style={[styles.chipText, amount === a && styles.chipTextActive]}>
@@ -391,17 +481,16 @@ const styles = StyleSheet.create({
     padding: 24,
     marginTop: 8,
   },
-  statusTitle: { marginTop: 12, fontSize: 19, fontWeight: '800', color: colors.ink },
+  statusTitle: { fontSize: 19, fontWeight: '800', color: colors.ink, marginBottom: 14 },
   statusBody: {
-    marginTop: 8,
+    marginTop: 12,
     fontSize: 14.5,
     lineHeight: 21,
     color: colors.muted,
     textAlign: 'center',
   },
-  statusHint: { marginTop: 12, fontSize: 12.5, color: colors.goldDark, fontWeight: '700' },
   statusNote: {
-    marginTop: 6,
+    marginTop: 12,
     fontSize: 12,
     lineHeight: 17,
     color: colors.muted,
@@ -415,6 +504,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  // Staged progress tracker.
+  steps: { alignSelf: 'stretch' },
+  stepRow: { flexDirection: 'row' },
+  stepIconCol: { width: 30, alignItems: 'center' },
+  stepRail: { width: 2, flex: 1, backgroundColor: colors.line, borderRadius: 1, marginVertical: 3 },
+  stepText: { flex: 1, marginLeft: 12 },
+  stepTextSpaced: { paddingBottom: 18 },
+  stepTitle: { fontSize: 14.5, fontWeight: '700', color: colors.ink, lineHeight: 20 },
+  stepTitleTodo: { color: colors.muted, fontWeight: '600' },
+  stepSub: { marginTop: 2, fontSize: 12.5, lineHeight: 17, color: colors.muted },
   receiptChip: {
     marginTop: 16,
     alignItems: 'center',

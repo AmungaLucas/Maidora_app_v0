@@ -285,6 +285,81 @@ router.get('/:id', requireAuth, async (req, res, next) => {
 
 // POST /api/payments/callback — Safaricom posts the final result here.
 // Must respond quickly with an ACK regardless of payload shape.
+//
+// RACE HARDENING (2026-10-31): the background push writes checkout_request_id
+// onto the row right after the app got its respond-first answer, and on a
+// loaded host that UPDATE can lag (observed 13.4s on payment #32 — MySQL
+// stall, while Daraja had already accepted at t+2.2s). A callback arriving
+// inside that window matches 0 rows and Safaricom does NOT retry, so the
+// receipt would be lost forever. The first attempt therefore runs inline;
+// if it matches nothing, the exact same settlement is retried in the
+// BACKGROUND (~every 2.5s for up to ~60s) while Safaricom gets its ACK
+// immediately. Residual risk: a gateway restart inside the retry window —
+// the 150s Daraja-query path would still settle the payment (without the
+// receipt number).
+const CB_RETRY_MS = 2500;
+const CB_RETRY_MAX = 24; // ~60s of background retries
+
+// Apply a Daraja callback result to the row matched by checkout_request_id.
+// Returns the number of rows updated (0 = row not ready yet).
+async function settleByCheckoutId(cb, items, rawJson) {
+  const rc = cb.ResultCode === undefined || cb.ResultCode === null ? null : Number(cb.ResultCode);
+  const status = rc === 0 ? 'success' : 'failed';
+  // Unconditional on purpose: the callback overrides any state the
+  // query path wrote (it is the authoritative result from Safaricom).
+  const [r] = await pool.query(
+    `UPDATE payments
+     SET status = ?, result_code = ?, result_desc = ?, mpesa_receipt = ?, raw_callback = ?
+     WHERE checkout_request_id = ?`,
+    [
+      status,
+      rc,
+      String(cb.ResultDesc || '').slice(0, 250),
+      items.MpesaReceiptNumber || null,
+      rawJson,
+      cb.CheckoutRequestID,
+    ]
+  );
+  if (!r.affectedRows) return 0;
+  console.error(
+    `[MPESA] callback → ${cb.CheckoutRequestID} SETTLED ${status.toUpperCase()} rc=${rc} ` +
+      `receipt=${items.MpesaReceiptNumber || '-'} rows=${r.affectedRows} "${String(cb.ResultDesc || '')}"`
+  );
+  // Purpose/user for side-effects (kyc_urgent) — purpose is immutable on the
+  // row, so reading it after the settlement is equivalent to reading before.
+  const [[pay]] = await pool.query(
+    'SELECT user_id, purpose FROM payments WHERE checkout_request_id = ? LIMIT 1',
+    [cb.CheckoutRequestID]
+  );
+  if (status === 'success' && pay && pay.purpose === 'kyc_urgent') {
+    await grantKycUrgent(pay.user_id);
+  }
+  return r.affectedRows;
+}
+
+function retrySettle(cb, items, rawJson, attempt = 1) {
+  if (attempt > CB_RETRY_MAX) {
+    console.error(
+      `[payments/callback] giving up on ${cb.CheckoutRequestID} after ${CB_RETRY_MAX} retries ` +
+        `(~${Math.round((CB_RETRY_MAX * CB_RETRY_MS) / 1000)}s) — the 150s query path can still settle it (without receipt)`
+    );
+    return;
+  }
+  setTimeout(async () => {
+    try {
+      const rows = await settleByCheckoutId(cb, items, rawJson);
+      if (rows > 0) {
+        console.error(`[payments/callback] late row write matched on retry #${attempt} — ${cb.CheckoutRequestID} settled from callback`);
+      } else {
+        retrySettle(cb, items, rawJson, attempt + 1);
+      }
+    } catch (e) {
+      console.error(`[payments/callback] retry #${attempt} error:`, e.message);
+      retrySettle(cb, items, rawJson, attempt + 1);
+    }
+  }, CB_RETRY_MS);
+}
+
 router.post('/callback', async (req, res) => {
   try {
     const cb = req.body && req.body.Body && req.body.Body.stkCallback;
@@ -293,36 +368,19 @@ router.post('/callback', async (req, res) => {
       if (cb.CallbackMetadata && Array.isArray(cb.CallbackMetadata.Item)) {
         for (const it of cb.CallbackMetadata.Item) items[it.Name] = it.Value;
       }
-      const rc = cb.ResultCode === undefined || cb.ResultCode === null ? null : Number(cb.ResultCode);
-      const status = rc === 0 ? 'success' : 'failed';
-      // Purpose/user for side-effects (kyc_urgent) — read before the override.
-      const [[pay]] = await pool.query(
-        'SELECT user_id, purpose FROM payments WHERE checkout_request_id = ? LIMIT 1',
-        [cb.CheckoutRequestID]
-      );
-      // Unconditional on purpose: the callback overrides any state the
-      // query path wrote (it is the authoritative result from Safaricom).
-      const [r] = await pool.query(
-        `UPDATE payments
-         SET status = ?, result_code = ?, result_desc = ?, mpesa_receipt = ?, raw_callback = ?
-         WHERE checkout_request_id = ?`,
-        [
-          status,
-          rc,
-          String(cb.ResultDesc || '').slice(0, 250),
-          items.MpesaReceiptNumber || null,
-          JSON.stringify(req.body).slice(0, 4000),
-          cb.CheckoutRequestID,
-        ]
-      );
-      console.error(
-        `[MPESA] callback → ${cb.CheckoutRequestID} SETTLED ${status.toUpperCase()} rc=${rc} ` +
-          `receipt=${items.MpesaReceiptNumber || '-'} rows=${r.affectedRows} "${String(cb.ResultDesc || '')}"`
-      );
-      if (!r.affectedRows) {
-        console.warn(`[payments/callback] no payment row matches ${cb.CheckoutRequestID}`);
-      } else if (status === 'success' && pay && pay.purpose === 'kyc_urgent') {
-        await grantKycUrgent(pay.user_id);
+      const rawJson = JSON.stringify(req.body).slice(0, 4000);
+      let rows = 0;
+      try {
+        rows = await settleByCheckoutId(cb, items, rawJson);
+      } catch (e) {
+        console.error('[payments/callback] settlement error:', e.message);
+      }
+      if (!rows) {
+        console.warn(
+          `[payments/callback] no payment row matches ${cb.CheckoutRequestID} yet — retrying in background ` +
+            `(every ${CB_RETRY_MS / 1000}s × ${CB_RETRY_MAX})`
+        );
+        retrySettle(cb, items, rawJson);
       }
     } else {
       console.warn(
