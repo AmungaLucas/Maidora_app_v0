@@ -78,17 +78,36 @@ export function AppProvider({ children }) {
       setProfileCompleteness,
       refreshCompleteness,
       signIn: async (newToken, newUser) => {
+        console.log(`[AUTH] signIn: storing session for ${newUser?.phone || newUser?.id || '?'}`);
         await storage.saveSession(newToken, newUser);
         await storage.clearPendingReg();
         setToken(newToken);
         setUser(newUser);
         setPendingRegState(null);
       },
+      // EVENT TRACE (owner request 2026-10-31 — "we can also log the events"):
+      // every logout now prints a [AUTH] trail to the Metro console.
+      //
+      // STATE FIRST (owner report 2026-10-31 — "clicked logout but it didn't
+      // navigate to login; it did reset the data until I reload/restart"):
+      // the old order awaited storage.clearSession() BEFORE the setters, so
+      // any AsyncStorage hiccup cleared the disk session (restart → Login)
+      // while the running UI never heard about it (stayed on the tabs). Now
+      // token/user flip synchronously — the root stack's auth-key remount
+      // fires unconditionally — and storage is cleared after, best-effort.
       signOut: async () => {
-        await storage.clearSession();
+        console.log(`[AUTH] signOut: start (had token=${!!token} user=${!!user})`);
         setToken(null);
         setUser(null);
         setProfileCompleteness(null);
+        try {
+          await storage.clearSession();
+          console.log('[AUTH] signOut: session cleared from storage — root remounts on Login');
+        } catch (e) {
+          // UI has already flipped; a storage failure here only means stale
+          // disk keys, which the next signIn overwrites.
+          console.log('[AUTH] signOut: storage clear FAILED —', e?.message || e);
+        }
       },
       completeOnboarding: async () => {
         await storage.setOnboarding(true);

@@ -25,9 +25,13 @@ export default function SettingsScreen() {
   // No resetRoot here: it exists on STACK navigation only, and this screen
   // also renders INSIDE the Profile drawer, where navigation.resetRoot is
   // undefined — calling it threw "TypeError: undefined is not a function"
-  // on every logout (owner report 2026-10-31).
+  // on every logout (owner report 2026-10-31). .catch keeps a failure on the
+  // [AUTH] trail (owner request 2026-10-31: "we can also log the events").
   const logOut = () => {
-    signOut();
+    console.log('[AUTH] logOut: settings row tapped');
+    Promise.resolve(signOut()).catch((e) =>
+      console.log('[AUTH] logOut: settings FAILED —', e?.message || e)
+    );
   };
 
   return (

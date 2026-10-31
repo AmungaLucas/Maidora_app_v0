@@ -71,8 +71,13 @@ function BrandDrawerContent({ navigation, state }) {
   // that helper exists on STACK navigators only, and the drawer-content
   // navigation is a DRAWER object, so logout threw
   // "TypeError: undefined is not a function" (owner report 2026-10-31).
+  // .catch keeps a failed signOut on the [AUTH] trail instead of dying as an
+  // unhandled rejection (owner request 2026-10-31: "we can also log the events").
   const logOut = () => {
-    signOut();
+    console.log('[AUTH] logOut: drawer footer tapped');
+    Promise.resolve(signOut()).catch((e) =>
+      console.log('[AUTH] logOut: drawer FAILED —', e?.message || e)
+    );
   };
 
   return (

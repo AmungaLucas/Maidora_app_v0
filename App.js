@@ -87,13 +87,31 @@ function RootNavigator() {
     };
   }, [token, signOut, updateUser]);
 
+  // [AUTH] EVENT TRACE (owner request 2026-10-31 — "we can also log the
+  // events"): prints the navigator's auth key and where a remount would
+  // land on every auth-state change, so a field report like "logout didn't
+  // navigate" comes with a trail instead of a guess. Expected logout trail:
+  //   [AUTH] signOut: start → session cleared → root: key=out → Login
+  const authKeyDebug = token && user ? 'in' : 'out';
+  const landedRoute =
+    pendingReg ? 'Otp'
+    : token && user ? (user?.role ? 'tabs' : 'RoleSelect')
+    : onboardingComplete ? 'Login'
+    : 'Welcome';
+  useEffect(() => {
+    if (booting) return;
+    console.log(
+      `[AUTH] root: key=${authKeyDebug} → ${landedRoute} ` +
+        `(token=${!!token} user=${!!user} pendingReg=${!!pendingReg} onboarding=${!!onboardingComplete})`
+    );
+  }, [authKeyDebug, landedRoute, booting, token, user, pendingReg, onboardingComplete]);
+
   if (booting) return <SplashScreen />;
 
   let initialRoute = 'Welcome';
   if (pendingReg) initialRoute = 'Otp';
   else if (token && user) initialRoute = user.role ? tabsRouteFor(user) : 'RoleSelect';
   else if (onboardingComplete) initialRoute = 'Login';
-
   // Headers (reactnavigation.org/docs/headers + /docs/header-buttons):
   // every NON-tab screen shows the navigator's own branded bar — the back
   // button is automatic in a stack navigator (it appears only when there is

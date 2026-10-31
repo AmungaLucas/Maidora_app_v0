@@ -6,6 +6,51 @@
 
 ---
 
+## 2026-10-31 — Logout navigation hardening + `[AUTH]` event trail · hamburger ghost style (owner field feedback)
+
+Owner round-trip on the `72f4620`/`5a2b60b` build (browsing the drawer
+screens): **(a)** the hamburger "looks like it's floating — not sure whether
+it's the background blending or the button is actually floating… we can add a
+subtle drop shadow and then remove the background"; **(b)** "I clicked logout
+but it didn't navigate to login… it did reset the data but [nothing] until I
+reload/restart the app — we can also log the events."
+
+- **Logout — why the key-remount fix alone wasn't enough.** The remount is
+  driven by `token`/`user` state, but `signOut` **awaited
+  `storage.clearSession()` before the setters**. That is the only path where
+  the disk session can be gone (restart → Login, exactly what the owner saw)
+  while the running UI never hears about it: one AsyncStorage throw /
+  rejection before `setToken(null)` skipped every state flip. **Fix
+  (AppContext.js):** state FIRST — `setToken(null)`/`setUser(null)`/
+  `setProfileCompleteness(null)` run synchronously so the root stack's
+  `key='in'→'out'` remount on Login is unconditional — then storage clear,
+  best-effort, in try/catch (a failure now only means stale disk keys, which
+  the next `signIn` overwrites).
+- **`[AUTH]` event trail (owner: "we can also log the events").** New
+  `console.log` trace, same spirit as `[MPESA]`/`[KYC]`: tap source
+  (`drawer footer tapped` / `settings row tapped`) → `signOut: start (had
+  token=… user=…)` → `session cleared from storage` **or** `storage clear
+  FAILED — <msg>` → `[AUTH] root: key=in|out → route (token=… user=…
+  pendingReg=… onboarding=…)` on every auth-state change (App.js effect, hook
+  kept above the `booting` early-return). `signIn` logs the session store
+  too. Both `logOut` handlers wrap `signOut()` in `Promise.resolve(...).catch`
+  so a failure lands on the trail instead of dying as an unhandled rejection.
+- **Hamburger ghost style (DrawerMenuButton.js).** The old white
+  (`colors.card`) rounded square + border read as a floating chip on the
+  cream header. Background and border removed — bare `menu` icon (size 26,
+  brand) — with a subtle drop shadow riding the **glyph** via `textShadow`
+  (rgba forest @ 0.28, r=3, y+1). Chosen over `elevation` because Android
+  View elevation needs a background to cast from — precisely what was
+  removed; `textShadow` renders on both platforms.
+- **Verify:** Babel parse OK ×5 (App.js, AppContext, ProfileDrawer,
+  SettingsScreen, DrawerMenuButton); render-path simulation
+  `scripts/verify_logout_hamburger.js` — old order + storage throw = **0
+  state flips** (UI stranded, the reported bug), new order = flips always +
+  storage cleared when possible. Docs: §1 logout row field-hardened, drawer
+  row gains the ghost-style note.
+
+---
+
 ## 2026-10-31 — Headers re-based on the OFFICIAL React Navigation implementation (owner: "read the docs")
 
 After the previous round shipped headers as **in-content chrome** (custom
