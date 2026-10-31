@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, ApiError } from '../../api';
 import { useApp } from '../../context/AppContext';
-import { captureCurrentLocation, fetchLocationIfPermitted } from '../../location';
+import { captureCurrentLocation, autofillLocationAskingOnce } from '../../location';
 import { LINKS, colors, radius } from '../../theme';
 import { validateSignup } from '../../validation';
 import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
@@ -35,17 +35,17 @@ export default function SignupScreen({ navigation }) {
 
   const { valid, errors } = useMemo(() => validateSignup(form), [form]);
 
-  // AUTO-FILL (owner request 2026-10-31 — "we dont need to ask use my
-  // current location... just fetch the current location and autofill that
-  // field"): when location permission is ALREADY granted (it usually is —
-  // login captures it silently), the field fills itself on entry. Never
-  // prompts; if permission is missing the field stays manual and the button
-  // below is the one that asks. Only fills an EMPTY field — never clobbers
-  // what the user typed. Once per screen mount.
+  // AUTO-FILL (owner request 2026-11-01 — "can it be automatic without
+  // necessarily pressing refresh my location?"): fills itself on entry.
+  // Permission already granted → silent capture. NEVER asked before (fresh
+  // install / cleared storage) → the OS dialog pops ONCE, right here, with
+  // the location field visible (autofillLocationAskingOnce in location.js).
+  // Denied → the field stays manual and only the button below ever re-asks.
+  // Never clobbers what the user typed. Once per screen mount.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const result = await fetchLocationIfPermitted();
+      const result = await autofillLocationAskingOnce();
       if (!result || cancelled || autofilledRef.current) return;
       autofilledRef.current = true;
       setCoords({

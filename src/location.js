@@ -52,7 +52,7 @@ export async function captureCurrentLocation() {
 
 // Silent auto-fill: returns a fix ONLY when permission is ALREADY granted.
 // Never prompts, never throws — an un-granted/offline state simply returns
-// null and the field stays manual. The explicit "Use my current location"
+// null and the field stays manual. The explicit "Refresh my location"
 // button remains the only thing that may trigger the OS permission dialog
 // (owner request 2026-10-31: auto-fill without asking, permission is
 // typically already granted from the login capture).
@@ -61,6 +61,30 @@ export async function fetchLocationIfPermitted() {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status !== 'granted') return null;
     return await captureCurrentLocation(); // permission granted → no prompt
+  } catch {
+    return null;
+  }
+}
+
+// Signup auto-fill (owner request 2026-11-01 — "can it be automatic without
+// necessarily pressing refresh my location?"): the ONE contextual place we
+// ask for the permission ourselves. Already granted → silent capture (same
+// as above). NEVER asked before (status 'undetermined' — fresh install /
+// cleared storage) → show the OS dialog once, on a screen where the
+// location field is visible so the ask has a reason to exist. DENIED →
+// never re-prompt (the explicit button stays the manual re-ask); the field
+// simply stays manual. Deliberately NOT an install-time permission wall —
+// users deny blind multi-permission screens, and the store reviewers
+// expect asks to be tied to the feature that needs them.
+export async function autofillLocationAskingOnce() {
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status === 'granted') return await captureCurrentLocation();
+    if (status === 'undetermined') {
+      const req = await Location.requestForegroundPermissionsAsync();
+      if (req.status === 'granted') return await captureCurrentLocation();
+    }
+    return null; // denied / restricted — stay manual, no nagging
   } catch {
     return null;
   }

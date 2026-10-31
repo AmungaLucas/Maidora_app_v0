@@ -6,6 +6,51 @@
 
 ---
 
+## 2026-11-01 — resetRoot routing CONFIRMED on device · signup location permission ask · OTP screen revamp
+
+Owner: "Great now working fine... after otp i get to the role select screen,
+logout takes me to loginscreen." — the `resetRoot` mechanism (81d95f8) is
+confirmed by field test. Two UX items followed.
+
+**1. Signup location auto-fill now ASKS once (owner question — "can it be
+automatic without necessarily pressing refresh my location, or all
+permission be requested after app installation?").**
+Root cause of the empty field on a fresh install: the auto-fill was
+silent-only (`fetchLocationIfPermitted` never prompts), and after the owner
+cleared app cache the permission was gone — so the field stayed empty until
+the button was pressed. New `autofillLocationAskingOnce()` (location.js):
+granted → silent capture; **'undetermined' → the OS dialog pops ONCE on the
+signup screen itself** (the location field is visible, so the ask has
+context); denied → never re-prompted (button stays the manual re-ask).
+Deliberately NOT an install-time permission wall — users deny blind
+multi-permission screens and store review expects asks tied to the feature.
+Login pre-warm stays silent (§6 best-effort, never blocks login).
+
+**2. OTP screen rebuilt (owner: "we need to revamp the ui of the otp
+screen").**
+- Compact layout: resend counter + "Wrong number? Start over" now sit right
+  under the input (they used to pin to the screen bottom behind the
+  keyboard); Screen's KeyboardAvoidingView lifts the block. Banners moved
+  between the hint and the CTA (always visible).
+- Paste code button REMOVED (owner) — OS SMS autofill (oneTimeCode /
+  sms-otp) still fills the hidden field; expo-clipboard import dropped.
+- Keyboard reliably re-opens: tapping the boxes runs blur → next-frame
+  focus on the hidden input (a plain focus() is a no-op when Android still
+  considers the field focused after a dismiss — owner: "when i dismiss the
+  keyboard i cant launch it again").
+- Reanimated animations: boxes pop as digits land, the active box lifts;
+  wrong code → row shake + boxes flash red (digits held ~0.56s then cleared,
+  never wiping retyped digits; `submittedRef` resets so the same code can be
+  re-verified); correct code → green wave sweeps the boxes left-to-right
+  during a deliberate ~0.64s success beat BEFORE `signIn` hands off (the
+  root reset follows immediately). Logic (pendingReg, finishingRef, no
+  manual navigation) untouched.
+
+Verified: babel parse OK on OtpScreen / SignupScreen / location.js; clipboard
+import fully removed. No backend change.
+
+---
+
 ## 2026-10-31 (latest) — Root auth routing rebuilt on `resetRoot`: the navigator key-remount is retired
 
 Two more owner trails killed the key-remount theory for good:
