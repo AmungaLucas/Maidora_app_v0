@@ -14,7 +14,7 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useRef } from 'react';
 import { View } from 'react-native';
-import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -57,7 +57,7 @@ const navTheme = {
   },
 };
 
-function RootNavigator() {
+function RootNavigator({ navigationRef }) {
   const { booting, token, user, onboardingComplete, pendingReg, signOut, updateUser } = useApp();
   const bootValidatedRef = useRef(false);
 
@@ -93,25 +93,60 @@ function RootNavigator() {
   // navigate" comes with a trail instead of a guess. Expected logout trail:
   //   [AUTH] signOut: start → session cleared → root: key=out → Login
   const authKeyDebug = token && user ? 'in' : 'out';
-  const landedRoute =
+  // The REAL route name the auth state wants the root stack to sit on — used
+  // by the trace, the initial route and the reset effect below. (It used to
+  // print the pseudo-name 'tabs' for role-set users; the actual tab route is
+  // more useful in a trail.)
+  const landingRoute =
     pendingReg ? 'Otp'
-    : token && user ? (user?.role ? 'tabs' : 'RoleSelect')
+    : token && user ? (user?.role ? tabsRouteFor(user) : 'RoleSelect')
     : onboardingComplete ? 'Login'
     : 'Welcome';
   useEffect(() => {
     if (booting) return;
     console.log(
-      `[AUTH] root: key=${authKeyDebug} → ${landedRoute} ` +
+      `[AUTH] root: key=${authKeyDebug} → ${landingRoute} ` +
         `(token=${!!token} user=${!!user} pendingReg=${!!pendingReg} onboarding=${!!onboardingComplete})`
     );
-  }, [authKeyDebug, landedRoute, booting, token, user, pendingReg, onboardingComplete]);
+  }, [authKeyDebug, landingRoute, booting, token, user, pendingReg, onboardingComplete]);
+
+  // RESET-BASED AUTH ROUTING (owner trails 2026-10-31 — "logout did not push
+  // me to login screen", "still i land on a blank screen after the otp"):
+  // the previous mechanism keyed this navigator on the auth state and relied
+  // on React unmounting/remounting the whole tree. Both trails show the state
+  // flip landing perfectly (every [AUTH] line correct) while the MOUNTED tree
+  // silently ignored the remount: logout left tabs/drawer/KYC alive and
+  // interactive for a full minute (their API calls 401'd), and the OTP
+  // handoff re-rendered the OLD Otp screen blank through its !pendingReg
+  // guard. Context updates reach the old tree even when the key remount does
+  // not happen. So the remount trick is retired — one persistent navigator
+  // plus the documented resetRoot
+  // (reactnavigation.org/docs/navigating-without-navigation-prop) whenever
+  // the landing differs from the stack's top route. That is the SAME action
+  // path as the in-app resets that demonstrably work on this device
+  // (RoleSelect → tabs, Login → Otp replace).
+  useEffect(() => {
+    if (booting) return;
+    const top = navigationRef.current?.getRootState?.()?.routes?.slice(-1)[0]?.name;
+    if (!top || top === landingRoute) return;
+    // While signed OUT, never fight the auth flow's own handoffs — Signup's
+    // replace('Otp') and Otp's reset(Welcome) navigate themselves. Only
+    // rescue screens that belong to a signed-in tree (tabs/drawer/stack)
+    // after a logout or a 401 signOut.
+    const authFlowRoute = ['Welcome', 'Login', 'Signup', 'Otp', 'ForgotPassword'].includes(top);
+    if (authKeyDebug === 'out' && !authFlowRoute) {
+      console.log(`[AUTH] root: resetRoot → ${landingRoute} (top was ${top})`);
+      navigationRef.current.resetRoot({ index: 0, routes: [{ name: landingRoute }] });
+    } else if (authKeyDebug === 'in' && top !== landingRoute) {
+      // Signed-in landing (RoleSelect after OTP / tabs after login) — the
+      // old screen belongs to the out-tree and the handoff wants a fresh one.
+      console.log(`[AUTH] root: resetRoot → ${landingRoute} (top was ${top})`);
+      navigationRef.current.resetRoot({ index: 0, routes: [{ name: landingRoute }] });
+    }
+  }, [booting, landingRoute, authKeyDebug, navigationRef]);
 
   if (booting) return <SplashScreen />;
 
-  let initialRoute = 'Welcome';
-  if (pendingReg) initialRoute = 'Otp';
-  else if (token && user) initialRoute = user.role ? tabsRouteFor(user) : 'RoleSelect';
-  else if (onboardingComplete) initialRoute = 'Login';
   // Headers (reactnavigation.org/docs/headers + /docs/header-buttons):
   // every NON-tab screen shows the navigator's own branded bar — the back
   // button is automatic in a stack navigator (it appears only when there is
@@ -123,19 +158,16 @@ function RootNavigator() {
   // quiet top spacing, and the SAME static config works for their pushed
   // states (back chevron appears automatically).
   //
-  // KEY-REMOUNT ON AUTH FLIPS (logout fix, owner report 2026-10-31):
-  // React Navigation ignores initialRouteName changes on an already-mounted
-  // navigator, so signing out used to strand the UI on the tabs with no
-  // session. Keying the navigator on the signed-in STATE makes the whole
-  // stack rebuild from the recomputed initial route (Login / RoleSelect /
-  // tabs) the moment token+user flip — the same reason logOut in the drawer
-  // and Settings now calls signOut() with no navigation calls. Keying on the
-  // STATE (not the raw token) keeps token REFRESHES (/me) remount-free.
-  const authKey = token && user ? 'in' : 'out';
+  // RESET ON AUTH FLIPS (see the reset effect above for the full story):
+  // initialRouteName only matters for the FIRST mount after boot — React
+  // Navigation ignores it on an already-mounted navigator, so every later
+  // auth flip is driven by navigationRef.resetRoot (documented
+  // "navigating without the navigation prop" pattern). No navigator key —
+  // the key-remount approach (logout fix 2026-10-31) turned out to be the
+  // one path that never actually rebuilt the tree on device.
   return (
     <Stack.Navigator
-      key={authKey}
-      initialRouteName={initialRoute}
+      initialRouteName={landingRoute}
       screenOptions={{
         headerShown: true,
         headerStyle: { backgroundColor: colors.cream },
@@ -176,12 +208,17 @@ function RootNavigator() {
 }
 
 export default function App() {
+  // Container-level ref — RootNavigator drives auth routing through it
+  // (resetRoot) because the flip can originate anywhere (drawer footer,
+  // 401 in the boot validator, OTP success) and those screens' own
+  // navigation objects cannot reset the ROOT stack reliably.
+  const navigationRef = useNavigationContainerRef();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AppProvider>
-          <NavigationContainer theme={navTheme}>
-            <RootNavigator />
+          <NavigationContainer ref={navigationRef} theme={navTheme}>
+            <RootNavigator navigationRef={navigationRef} />
           </NavigationContainer>
         </AppProvider>
       </SafeAreaProvider>

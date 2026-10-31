@@ -37,6 +37,11 @@ export default function OtpScreen({ navigation }) {
   // (null) clears the context before signIn commits) and reset the stack to
   // Welcome behind the owner's back (wrong-screen report 2026-10-31).
   const finishingRef = useRef(false);
+  // Last known phone label — pendingReg is already null during the handoff
+  // window, but the screen must keep its content until the root reset swaps
+  // it out (no blank flash).
+  const phoneLabelRef = useRef(null);
+  if (pendingReg) phoneLabelRef.current = pendingReg.maskedPhone || pendingReg.phone || null;
 
   useEffect(() => {
     if (!pendingReg && !finishingRef.current) {
@@ -63,15 +68,15 @@ export default function OtpScreen({ navigation }) {
       // signIn committed, which (a) hit the `if (!pendingReg)` guard below
       // and rendered this screen EMPTY under the stack header, and (b) put
       // the root in a transient key=out → Login state ahead of the real
-      // key=in remount. signIn clears pendingReg itself, batched with
-      // token+user in ONE render — the very first flip is already the
-      // remount, so there is nothing to see in between.
+      // landing. signIn clears pendingReg itself, batched with token+user
+      // in ONE render — the very first flip is already the final state, so
+      // there is nothing to see in between.
       await signIn(res.token, res.user);
       // NO manual navigation here (same principle as the 2026-10-31 logout
-      // fix): signIn flips the root navigator's auth key and the stack
-      // REMOUNTS on the recomputed initial route — RoleSelect while no role
+      // fix): signIn flips the session and the root stack's reset effect
+      // (App.js — navigationRef.resetRoot) lands RoleSelect while no role
       // is set, the role tabs after onboarding. A manual reset here races
-      // that remount and could land the user on the wrong screen.
+      // that root reset and could land the user on the wrong screen.
     } catch (e) {
       finishingRef.current = false;
       setCode('');
@@ -125,7 +130,13 @@ export default function OtpScreen({ navigation }) {
     }
   };
 
-  if (!pendingReg) return <Screen scroll={false} />;
+  // Direct nav with nothing pending AND no handoff in flight → empty screen
+  // (the reset effect above sends the user back to the start). Mid-handoff
+  // (finishingRef) KEEP the real UI up: pendingReg is already null but the
+  // root reset to RoleSelect lands in this same commit — rendering the empty
+  // guard here is exactly the blank screen the owner kept seeing
+  // (owner report 2026-10-31: "still i land on a blank screen after the otp").
+  if (!pendingReg && !finishingRef.current) return <Screen scroll={false} />;
 
   return (
     <Screen edges={['left', 'right', 'bottom']}>
@@ -134,7 +145,7 @@ export default function OtpScreen({ navigation }) {
       <Text style={styles.title}>Verify your phone</Text>
       <Text style={styles.subtitle}>
         We sent a 6-digit code to{' '}
-        <Text style={styles.phone}>{pendingReg.maskedPhone || pendingReg.phone}</Text>
+        <Text style={styles.phone}>{phoneLabelRef.current || 'your phone'}</Text>
       </Text>
 
       <View style={{ marginTop: 28 }}>

@@ -6,6 +6,56 @@
 
 ---
 
+## 2026-10-31 (latest) — Root auth routing rebuilt on `resetRoot`: the navigator key-remount is retired
+
+Two more owner trails killed the key-remount theory for good:
+
+- **Logout**: drawer footer tapped → `signOut: start` → `root: key=out → Login`
+  → `session cleared` — the STATE machine was perfect, yet the owner stayed
+  inside the old tree for a full minute (opened KYC Verification, filled the
+  personal form, took an avatar photo — every API call 401) and "had to reload
+  the app".
+- **OTP**: `verify-otp → 200` → `signIn` → `root: key=in → RoleSelect` with NO
+  transient routes (the 5ea634e fix works at state level) — yet the owner
+  "still lands on a blank screen after the otp".
+
+**Conclusion: the mounted tree ignores a `key` change on `Stack.Navigator` in
+this environment (RN new architecture + react-native-screens 4.30). Context
+updates still propagate INTO the old tree — the OTP blank is OtpScreen's
+`!pendingReg` guard re-rendering empty inside the surviving tree.** Every
+in-navigator navigation action demonstrably works on device (RoleSelect →
+tabs reset, Login → Otp replace, drawer switches).
+
+**New mechanism (one persistent navigator + documented programmatic routing):**
+- `NavigationContainer ref={navigationRef}` (`useNavigationContainerRef()`);
+  RootNavigator receives the ref.
+- A reset effect compares the computed **landingRoute** (real route names —
+  the trace now prints `EmployerTabs`/`HousehelpTabs` instead of the
+  pseudo-name `tabs`) with the stack's top route
+  (`getRootState().routes.at(-1).name`) and dispatches
+  **`navigationRef.resetRoot(...)`** on mismatch
+  (reactnavigation.org/docs/navigating-without-navigation-prop).
+  - `key='out'`: only rescues screens that belong to a signed-in tree —
+    while on Welcome/Login/Signup/Otp/ForgotPassword the auth flow keeps
+    navigating itself (no fighting Signup's `replace('Otp')`).
+  - `key='in'`: mismatch = handoff (top is `Otp`/`Login`, landing is
+    RoleSelect or the role tabs) → reset. Token refreshes (/me) change no
+    dependency → never fire.
+  - Every dispatch logs `[AUTH] root: resetRoot → X (top was Y)` — the trail
+    now shows the action, not just the intent.
+- `key={authKey}` REMOVED from Stack.Navigator (single mechanism; the
+  initialRouteName still governs the first mount after boot).
+- OtpScreen: mid-handoff (`finishingRef`) the screen now KEEPS its content
+  (phone label pinned in a ref) instead of the empty `!pendingReg` guard
+  render — no blank frame even before the reset lands.
+
+Verified: `useNavigationContainerRef` + `resetRoot`/`getRootState` exist in
+the installed @react-navigation/core 7.x (re-exported by native); babel parse
+OK on App.js, OtpScreen, LoginScreen, ProfileDrawer. Comments in
+LoginScreen/ProfileDrawer/OtpScreen updated to the new mechanism.
+
+---
+
 ## 2026-10-31 (later) — Blank-screen-after-OTP + login-latency fixes · GPS now fills location_county/area
 
 Owner's field report from testing `2adcc6a`: OTP verify → **"blank screen with

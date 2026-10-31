@@ -116,11 +116,11 @@ export default function LoginScreen({ navigation }) {
         return;
       }
       await signIn(res.token, res.user);
-      // NO manual navigation here: signIn flips the root navigator's auth
-      // key and the stack remounts on the recomputed initial route —
-      // RoleSelect when the role is still unset (verified but never
-      // onboarded, §3.2), otherwise the role tabs. The old manual resets
-      // raced that remount (wrong-screen report 2026-10-31).
+      // NO manual navigation here: signIn flips the session and the root
+      // stack's reset effect (App.js — navigationRef.resetRoot) lands the
+      // recomputed route — RoleSelect when the role is still unset (verified
+      // but never onboarded, §3.2), otherwise the role tabs. The old manual
+      // resets raced that landing (wrong-screen report 2026-10-31).
     } catch (e) {
       setErrorMessage(e.message || 'Could not log you in. Please try again.');
     } finally {

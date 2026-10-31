@@ -65,14 +65,14 @@ function BrandDrawerContent({ navigation, state }) {
 
   const go = (route) => navigation.navigate(route);
 
-  // signOut flips the auth state in AppContext → the ROOT Stack.Navigator
-  // key changes ('in' → 'out') and the whole stack remounts on the computed
-  // initial route (Login). The old code called navigation.resetRoot here —
-  // that helper exists on STACK navigators only, and the drawer-content
-  // navigation is a DRAWER object, so logout threw
-  // "TypeError: undefined is not a function" (owner report 2026-10-31).
-  // .catch keeps a failed signOut on the [AUTH] trail instead of dying as an
-  // unhandled rejection (owner request 2026-10-31: "we can also log the events").
+  // signOut flips the auth state in AppContext → the ROOT stack's reset
+  // effect (App.js — navigationRef.resetRoot) lands the stack on Login.
+  // resetRoot targets the CONTAINER ref, so it works from anywhere (drawer
+  // footer included) — the old navigation.resetRoot here threw
+  // "TypeError: undefined is not a function" because the drawer-content
+  // navigation is a DRAWER object, not a stack navigator (owner report
+  // 2026-10-31). .catch keeps a failed signOut on the [AUTH] trail instead
+  // of dying as an unhandled rejection.
   const logOut = () => {
     console.log('[AUTH] logOut: drawer footer tapped');
     Promise.resolve(signOut()).catch((e) =>
