@@ -13,7 +13,7 @@
 // KYC banner (§8, hidden once approved), then live marketplace content —
 // employer: quick actions + open jobs + new maids; househelp: find-jobs CTA +
 // application credits (§9) + latest jobs.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -60,6 +60,16 @@ export default function HomeScreen({ navigation }) {
   const { user, token, profileCompleteness: completeness, refreshCompleteness, updateUser } = useApp();
   const isEmployer = user?.role === 'employer';
 
+  // CRITICAL loop-guard: `updateUser`'s identity changes whenever the user
+  // state changes, and THIS effect itself updates the user — putting it in
+  // the focus-effect deps would re-run the sync forever (api.me in a loop).
+  // Read it through a ref instead; deps stay [token, role] and the effect
+  // runs on focus + role flips only.
+  const updateUserRef = useRef(updateUser);
+  useEffect(() => {
+    updateUserRef.current = updateUser;
+  });
+
   // Live hub data (previews + counters) — silent on failure.
   const [hub, setHub] = useState({ jobs: [], maids: [], openJobs: 0, applicants: 0, creditsLeft: null, unread: 0 });
 
@@ -71,10 +81,26 @@ export default function HomeScreen({ navigation }) {
       (async () => {
         // 1. Re-sync the session so kycStatus / avatarUrl are never stale —
         //    this is what retires the verification banner the moment the
-        //    submission is approved (owner request 2026-11-01).
+        //    submission is approved (owner request 2026-11-01). Only write
+        //    when something the Home cares about actually changed — the
+        //    server returns a fresh token + object identity every time, and
+        //    a blind write here would also re-render needlessly.
         try {
           const me = await api.me(token);
-          if (!cancelled && me?.user) await updateUser(me.user, me.token);
+          if (!cancelled && me?.user) {
+            const u = me.user;
+            const changed =
+              !user ||
+              u.kycStatus !== user.kycStatus ||
+              u.kycRejectionReason !== user.kycRejectionReason ||
+              u.trustBadge !== user.trustBadge ||
+              u.accountStatus !== user.accountStatus ||
+              u.avatarUrl !== user.avatarUrl ||
+              u.fullName !== user.fullName ||
+              u.locationCounty !== user.locationCounty ||
+              u.locationArea !== user.locationArea;
+            if (changed) await updateUserRef.current(u, me.token);
+          }
         } catch {
           // offline / transient — keep the cached snapshot
         }
@@ -114,7 +140,8 @@ export default function HomeScreen({ navigation }) {
       return () => {
         cancelled = true;
       };
-    }, [token, user?.role, isEmployer, refreshCompleteness, updateUser])
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token, user?.role, isEmployer, refreshCompleteness])
   );
 
   const showCompletenessBanner =
