@@ -31,7 +31,7 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
 | App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
-| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending card shows a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN → confirmed), a **countdown** ("3:28 remaining") and a "Didn't get a prompt?" tips toggle; **success/failure are now SEPARATE screens** — subtle spring-checkmark celebration (receipt, amount, paid-at EAT, never on the synchronous ResponseCode 0) and a calm code-specific failure card (Try Again + Back to Home); **resume banner** offers to reattach a ≤10-min-old pending row on mount (app-closed-mid-payment edge case); no full-screen veil — the button's radar carries the push call; card crossfade retained |
+| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending card shows a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN → confirmed), a **countdown** ("3:28 remaining") and a "Didn't get a prompt?" tips toggle; **success/failure are now SEPARATE screens with BRAND ANIMATIONS** — SuccessMark (the mark draws itself: radar lock-on ping → house strokes draw in → gold seam finishes with a spark + one restrained brand spark burst; no generic checkmark, no confetti) and FailMark (radar rings collapse onto a ghost of the mark + gentle shake; calm code-specific failure card, Try Again + Back to Home); receipt, amount, paid-at EAT, never on the synchronous ResponseCode 0; **resume banner** offers to reattach a ≤10-min-old pending row on mount (app-closed-mid-payment edge case); no full-screen veil — the button's radar carries the push call; card crossfade retained |
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
@@ -354,11 +354,27 @@ retries), simulates the late write → `late row write matched on retry #2`
   call; ticks skip while one is in flight and `doneRef` swallows stray
   ticks (one end-log, always).
 - **Separate outcome screens (2026-10-31 UX round)**: SUCCESS gets its own
-  celebration (subtle spring checkmark, receipt, amount, paid-at EAT —
-  deterministic UTC+3 formatting) and FAILURE a calm code-specific card —
-  the tracker is progress-only and never appears on outcome screens.
-  Celebration fires only on a backend-confirmed ResultCode 0 (callback or
-  authoritative query), never on the synchronous push ResponseCode.
+  celebration (receipt, amount, paid-at EAT — deterministic UTC+3
+  formatting) and FAILURE a calm code-specific card — the tracker is
+  progress-only and never appears on outcome screens. Celebration fires
+  only on a backend-confirmed ResultCode 0 (callback or authoritative
+  query), never on the synchronous push ResponseCode.
+- **Brand terminal animations (2026-10-31, replaces the generic
+  checkmark)**: `components/brand/SuccessMark.js` — the exact BrandMark
+  paths (single source: `MARK_PATHS`) draw themselves stroke-by-stroke via
+  clamped `strokeDashoffset` windows on a JS master clock (dash lengths
+  measured from real path data, ×1.02 headroom): radar lock-on ring → p3
+  house → p2 inner stroke → p1 pillar fade (28%) → p4 gold seam → gold
+  spark at the seam end (stays, echoing BrandLoader's comet head) + 8
+  particle one-shot burst in gold/brandSoft/goldDark. View layers (ring,
+  spark, particles, badge spring) ride a parallel NATIVE-driven clock —
+  smooth on low-end Android while the JS clock paints the strokes.
+  `components/brand/FailMark.js` — the inverse: three radar rings collapse
+  INWARD (staggered, full fade-out) onto a ghost BrandMark rendered in
+  `colors.line`, a danger dot pops with slight overshoot, one soft danger
+  pulse breathes out, keyframed shake (0→−9→+8→−6→+4→0 px) — every layer
+  transform/opacity, fully native-driven. Both replay automatically (card
+  branch remounts on status flip) and both rest on a clean final frame.
 - **Resume on mount**: pending rows younger than 10 min trigger a
   "Resume watching / Dismiss" banner — covers the app-closed-mid-payment
   edge case (the gateway + M-Pesa SMS settle regardless).

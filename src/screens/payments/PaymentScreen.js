@@ -22,13 +22,18 @@
 //     4. Payment confirmed             — the terminal step; the tracker
 //                                        NEVER advances past stage 3 until
 //                                        the backend holds a real result.
-//   SUCCESS — separate celebration screen (subtle spring checkmark — no
-//     confetti; KES 50 should not feel like a lottery win), receipt number,
-//     amount, paid-at time (EAT), Back to Home. Fired only when the backend
-//     holds ResultCode 0 from the callback or an authoritative query.
-//   FAILED — separate calm card: specific reason by code (1 balance /
-//     1032 cancelled / 1037 no PIN in time / 2001 wrong PIN), reassurance
-//     that nothing was charged, Try Again + Back to Home.
+//   SUCCESS — separate celebration screen: the BRAND MARK draws itself
+//     (SuccessMark — radar lock-on ping, house strokes draw in, gold seam
+//     finishes with a spark + one restrained brand spark burst; no confetti,
+//     no generic checkmark — KES 50 should still not feel like a lottery
+//     win), receipt number, amount, paid-at time (EAT), Back to Home. Fired
+//     only when the backend holds ResultCode 0 from the callback or an
+//     authoritative query.
+//   FAILED — separate calm card: FailMark (the radar rings collapse onto a
+//     ghost of the mark — signal lost — plus a gentle shake) with the
+//     specific reason by code (1 balance / 1032 cancelled / 1037 no PIN in
+//     time / 2001 wrong PIN), reassurance that nothing was charged, Try
+//     Again + Back to Home.
 //
 // Timing: STK prompts regularly take 30-60s+ for the user to key their PIN,
 // so polling runs every 4s for up to ~3.5 minutes (the countdown mirrors
@@ -50,6 +55,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import BrandLoader from '../../components/brand/BrandLoader';
+import SuccessMark from '../../components/brand/SuccessMark';
+import FailMark from '../../components/brand/FailMark';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
@@ -163,18 +170,9 @@ export default function PaymentScreen({ navigation }) {
     ],
   };
 
-  // Success celebration: a subtle one-shot spring on the checkmark badge —
-  // calm and brand-true, no confetti.
-  const checkAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (statusKey !== 'success') return;
-    checkAnim.setValue(0);
-    Animated.spring(checkAnim, { toValue: 1, friction: 5, useNativeDriver: true }).start();
-  }, [statusKey, checkAnim]);
-  const checkStyle = {
-    opacity: checkAnim,
-    transform: [{ scale: checkAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
-  };
+  // Terminal-state animations live inside SuccessMark (the mark draws
+  // itself) and FailMark (radar collapse + shake) — both are one-shot and
+  // replay automatically because their card branch remounts on status flip.
 
   // Edge case: the app was closed (or crashed) while a prompt was open. The
   // gateway kept the row and the callback still settles it — offer to
@@ -441,9 +439,7 @@ export default function PaymentScreen({ navigation }) {
 
       {payment && payment.status === 'success' ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.brandSoft }, cardStyle]}>
-          <Animated.View style={[styles.successBadge, checkStyle]}>
-            <Ionicons name="checkmark" size={40} color={colors.brand} />
-          </Animated.View>
+          <SuccessMark size={148} />
           <Text style={styles.statusTitle}>Payment received</Text>
           <Text style={styles.statusBody}>
             KES {amount} received via M-Pesa from {(payment.phone || phone).replace(/\s/g, ' ')} —
@@ -460,7 +456,7 @@ export default function PaymentScreen({ navigation }) {
         </Animated.View>
       ) : payment && payment.status === 'failed' ? (
         <Animated.View style={[styles.statusCard, { borderColor: colors.danger }, cardStyle]}>
-          <Ionicons name="close-circle" size={46} color={colors.danger} />
+          <FailMark size={122} />
           <Text style={styles.statusTitle}>Payment not completed</Text>
           <Text style={styles.statusBody}>{friendlyFailure(payment)}</Text>
           <Text style={styles.statusNote}>
@@ -596,17 +592,6 @@ const styles = StyleSheet.create({
     color: colors.goldDark,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  // Success celebration.
-  successBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.brandSoftBg,
-    borderWidth: 1.5,
-    borderColor: colors.brandSoft,
   },
   paidLine: { marginTop: 10, fontSize: 12, color: colors.muted },
   // Staged progress tracker.

@@ -6,6 +6,54 @@
 
 ---
 
+## 2026-10-31 — Brand terminal animations: SuccessMark + FailMark
+
+Owner: "can we design success and failure animations along and around our
+brand identity since the generic checkmark is too common". Pure UI round —
+zero backend changes, zero flow changes (polling, receipt chase, resume,
+adopt all untouched). Both result cards keep their layout; only the mark at
+the top changed.
+
+- **SuccessMark** (`src/components/brand/SuccessMark.js`) — the Maidora mark
+  DRAWS ITSELF: one soft radar lock-on ring expands and fades (the same
+  radar the user just watched in the tracker "locks on"), then the exact
+  BrandMark paths draw stroke-by-stroke — p3 house → p2 inner stroke → p1
+  pillar fades to its 28% fill → p4 gold seam last — finished by a gold
+  spark popping at the seam end (echoes BrandLoader's comet head) and a
+  single 8-particle burst in gold/brandSoft/goldDark. No confetti rain, no
+  generic checkmark; rests on the finished mark + spark.
+  - Dash lengths measured from the real path data (`scripts/mark_path_lengths.js`:
+    p2 423.6, p3 1720.3, p4 122.1 units; ×1.02 headroom) so reveal speed is
+    proportional to true stroke length.
+  - Two clocks: JS-driven master for `strokeDashoffset` (non-transform SVG
+    prop — cannot be native), parallel NATIVE-driven clock for every view
+    layer (ring, spark, halo, particles, badge spring). All interpolations
+    clamped; every layer rests at its final frame.
+- **FailMark** (`src/components/brand/FailMark.js`) — the inverse: three
+  radar rings collapse INWARD (staggered, full fade-out) onto a GHOST of
+  the mark (same `MARK_PATHS`, rendered in `colors.line` — the home was
+  never reached), a danger dot pops with slight overshoot, one soft danger
+  pulse breathes out, and the badge gives one keyframed shake
+  (0→−9→+8→−6→+4→0 px). Every layer is transform/opacity → fully
+  native-driven; the gold seam is absent on failure by design (accent =
+  completion).
+- **PaymentScreen**: terminal cards now render `<SuccessMark size={148} />`
+  / `<FailMark size={122} />`; the old `checkAnim` spring + Ionicons
+  checkmark / close-circle removed (Ionicons stays for the tracker rows).
+  Both animations replay automatically — the card branch remounts on
+  status flip.
+- **Validation**: `scripts/check_jsx_marks.js` (Babel parse, 3/3 OK) +
+  `scripts/smoke_brand_marks.js` — a render smoke test that seeds stubs for
+  react/react-native/react-native-svg with RN-faithful `interpolate`
+  validation (monotonic inputRange, range-length match, NaN checks) and
+  renders all three components: 13/13 checks pass, incl. evaluating all 57
+  recorded interpolation configs inside/between/outside every window with
+  clamp semantics (no NaNs). Visual proof: `scripts/preview_brand_marks.js`
+  + `preview_sheets.py` re-implement the choreography math and emit frame
+  contact sheets (9 frames reviewed: lock-on → draw → pillar+seam → spark
+  burst; collapse → dot → pulse all read correctly).
+- Preview tooling lives in `/scripts` (not shipped in the app bundle).
+
 ## 2026-10-31 — Payment UX: staged progress tracker + callback race hardening
 
 Owner logs #30–#34 all healthy: rc=1 (insufficient balance) and rc=1037
