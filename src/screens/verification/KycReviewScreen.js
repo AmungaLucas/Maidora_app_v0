@@ -1,7 +1,7 @@
 // KYC step 4 — review (§33.1 step 7): every field and image, retake per
 // item (jumps straight into that item's guided capture on the unified
 // KycCapture screen, then returns here), then submit → /kyc/submit.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../api';
@@ -17,6 +17,7 @@ import {
   normalizeDraft,
   s as ks,
 } from './kycShared';
+import { kycLog } from '../../kycLog';
 
 export default function KycReviewScreen({ navigation, route }) {
   const { token, user, updateUser } = useApp();
@@ -24,16 +25,28 @@ export default function KycReviewScreen({ navigation, route }) {
   const [submitting, setSubmitting] = useState(false);
   const [banner, setBanner] = useState('');
 
+  useEffect(() => {
+    const isrc = (k) => (!draft.images[k] ? '∅' : String(draft.images[k]).startsWith('kyc://') ? 'server' : 'local');
+    kycLog(
+      `step 4 · review — doc=${draft.idType || '∅'}` +
+        ` images: front=${isrc('idFront')} back=${isrc('idBack')} selfie=${isrc('selfie')}`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function onSubmit() {
     setSubmitting(true);
     setBanner('');
+    kycLog('submit → POST /kyc/submit');
     try {
       await api.kycSubmit(token);
+      kycLog('submit OK — kycStatus=submitted');
       // Optimistically reflect the new state (server truth on next /me).
       await updateUser({ ...user, kycStatus: 'submitted', kycRejectionReason: null }, token);
       // Replace (not push) so Android back doesn't land on the review form.
       navigation.replace('KycDone', { urgent: draft.urgent });
     } catch (e) {
+      kycLog(`submit FAILED — ${e.message || e}`);
       setBanner(e.message || 'Could not submit. Check your connection and try again.');
     } finally {
       setSubmitting(false);
@@ -43,6 +56,7 @@ export default function KycReviewScreen({ navigation, route }) {
   function retake(field) {
     // One capture screen for all items — focus opens that item's guided
     // camera immediately, and returnTo jumps back here with the new shot.
+    kycLog(`review: retake → ${field}`);
     navigation.navigate('KycCapture', { draft, returnTo: 'KycReview', focus: field });
   }
 

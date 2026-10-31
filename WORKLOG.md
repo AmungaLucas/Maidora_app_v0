@@ -6,6 +6,46 @@
 
 ---
 
+## 2026-10-31 — KYC retake crash fix + end-to-end KYC flow trace
+
+Owner live report after walking the rebuilt flow: "great works fine… ERROR
+[ReferenceError: Property 'setShotDims' doesn't exist] took a photo and hit
+retake" — plus a build request: "lets log all the kyc processes frm the time
+one hits continue verification button api calls etc…".
+
+- **Retake crash — ROOT CAUSE**: `GuidedCapture.backToCamera` (the Retake
+  button + Android back on the confirm stage) still called
+  `setShotDims(null)` — a leftover from a state variable that was removed in
+  the guided-camera refactor. Hermes raises `ReferenceError: Property
+  'setShotDims' doesn't exist` the moment Retake is pressed. The call is
+  deleted (a comment documents why, so it doesn't get relearned).
+- **KYC flow trace** — same contract as the `[MPESA]` payment traces:
+  - New dependency-free `src/kycLog.js`: `kycStart(label)` opens a session
+    (random 4-char id + wall clock), `kycLog(msg)` stamps
+    `[KYC <id> +<elapsed>s]`, `kbOf(base64)` renders payload sizes (never the
+    payloads themselves).
+  - Session starts at the **Continue verification** press on the intro
+    screen — the exact point the owner asked the log to begin — with the
+    current KYC status and a draft/image summary.
+  - Breadcrumbs through every stage: intro state fetch, step 1–4 screen
+    entries (with dob/gender/doc-type/image-source summaries), profile
+    prefill, draft autosaves (incl. failures — the autosave used to swallow
+    errors silently), validation blocks (which field), doc-type picks,
+    capture opens (source sheet vs live selfie), ActionSheet source choice,
+    camera permission results, shutter + photo dims, crop dims + WebP KB,
+    gallery picks, retakes, photo accepted, upload ms + KB, submit, done.
+  - `api.js` now logs `[KYC]` round trips for **every `/kyc` and `/media`
+    call** — success and failure: method, path, status, ms, and for uploads
+    the payload KB (e.g. `[KYC] [214KB] POST /media/kyc/id_front → 200 in
+    1823ms`). Errors log the raw fetch shape (name/msg/status) exactly like
+    the MPESA ✗ lines, so timeouts/offline can't hide again.
+  - Urgent-upsell STK push / poll outcomes also traced (KSh 150 `kyc_urgent`).
+- **Validation**: `scripts/smoke_kyc_capture.js` — 38/38 OK (all modules
+  incl. the new trace import cleanly; all screen renders pass; crop-math
+  units unchanged). No backend change this round — client-side tracing only.
+
+---
+
 ## 2026-10-31 — KYC capture rebuild: one checklist + guided in-app camera + brand action sheet + edge-to-edge fix
 
 Owner walked the verification flow live: personal details → continue → "take

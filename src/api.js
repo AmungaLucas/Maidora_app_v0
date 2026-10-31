@@ -1,5 +1,12 @@
 // Thin fetch wrapper around the Maidora gateway API.
 import { API_BASE_URL } from './theme';
+import { kbOf } from './kycLog';
+
+// KYC flow tracing — every /kyc and /media round trip logs under [KYC] (the
+// same contract as [MPESA]), so a verification attempt reads as one story
+// in the console: state fetch, draft saves, uploads (with payload size),
+// submit. Payloads themselves are never logged — only their size.
+const KYC_PATH = /^\/(kyc|media)(\/|$)/;
 
 export class ApiError extends Error {
   constructor(message, status, code, field) {
@@ -15,6 +22,9 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
   const reqT0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const kycTag = KYC_PATH.test(path)
+    ? ` [${body?.dataBase64 ? kbOf(body.dataBase64) : method === 'POST' || method === 'PUT' ? 'json' : 'no-body'}]`
+    : '';
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method,
@@ -45,6 +55,9 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
     if (path.startsWith('/payments')) {
       console.log(`[MPESA] ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
     }
+    if (KYC_PATH.test(path)) {
+      console.log(`[KYC]${kycTag} ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
+    }
     return data;
   } catch (e) {
     const msg = String((e && e.message) || '');
@@ -54,6 +67,11 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
       // past the friendly mapping; log exactly what the device produced.
       console.log(
         `[MPESA] ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
+      );
+    }
+    if (KYC_PATH.test(path)) {
+      console.log(
+        `[KYC]${kycTag} ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
       );
     }
     // The device's fetch rejects with different shapes for a cancelled call

@@ -10,6 +10,7 @@ import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton, Screen, ScreenHeader } from '../../ui';
 import DrawerMenuButton from '../../components/common/DrawerMenuButton';
+import { kycLog, kycStart } from '../../kycLog';
 import { REASON_LABELS, emptyDraft } from './kycShared';
 
 const STATUS_COPY = {
@@ -47,11 +48,20 @@ export default function KycIntroScreen({ navigation }) {
 
   useEffect(() => {
     let alive = true;
+    kycLog('intro open — GET /kyc');
     (async () => {
       try {
         const res = await api.kycGet(token);
-        if (alive) setState(res);
+        if (alive) {
+          kycLog(
+            `intro: KYC state = ${res?.kycStatus || 'not_started'}` +
+              `${res?.urgent ? ' · urgent' : ''}` +
+              `${res?.rejectionReason ? ` · reason=${res.rejectionReason}` : ''}`
+          );
+          setState(res);
+        }
       } catch (e) {
+        kycLog(`intro: KYC state FAILED — ${e.message || e}`);
         if (alive) setError(e.message || 'Could not load your verification status.');
       } finally {
         if (alive) setLoading(false);
@@ -79,6 +89,15 @@ export default function KycIntroScreen({ navigation }) {
       },
       urgent: !!state?.urgent,
     };
+    // Trace session starts HERE — the owner asked for the log to begin at
+    // this button. Everything after is stamped with the session id + clock.
+    kycStart(`Continue verification pressed · status=${status}`);
+    kycLog(
+      `draft → personal · images: front=${draft.images.idFront ? 'server' : '∅'}` +
+        ` back=${draft.images.idBack ? 'server' : '∅'}` +
+        ` selfie=${draft.images.selfie ? 'server' : '∅'}` +
+        ` docType=${draft.idType || '∅'}`
+    );
     navigation.navigate('KycPersonal', { draft });
   }
 
@@ -170,14 +189,17 @@ export function UrgentUpsell({ token }) {
       try {
         const res = await api.mpesaStatus(paymentId, token, true);
         if (res.payment?.status === 'success') {
+          kycLog('urgent: payment success — review expedited');
           setPhase('done');
           setMsg('Urgent review is active. We will notify you within 72 hours — most urgent reviews come back sooner.');
           clearInterval(t);
         } else if (res.payment?.status === 'failed') {
+          kycLog(`urgent: payment failed — ${res.payment?.resultDesc || 'unknown'}`);
           setPhase('idle');
           setMsg(res.payment?.resultDesc || 'The payment could not be completed. You can try again.');
           clearInterval(t);
         } else if (n > 52) {
+          kycLog('urgent: gave up polling — callback may still land');
           setPhase('idle');
           setMsg('We stopped auto-checking the payment. If you completed it, the urgent review will activate shortly.');
           clearInterval(t);
@@ -192,12 +214,14 @@ export function UrgentUpsell({ token }) {
   async function goUrgent() {
     setMsg('');
     setPhase('pushing');
+    kycLog('urgent: STK push KSh 150 (purpose kyc_urgent)');
     try {
       const res = await api.mpesaStkPush({ amount: 150, purpose: 'kyc_urgent' }, token);
       setPaymentId(res.paymentId);
       setMsg('Check your phone — enter your M-Pesa PIN to pay KSh 150 for the urgent review.');
       setPhase('polling');
     } catch (e) {
+      kycLog(`urgent: push FAILED — ${e.message || e}`);
       setPhase('idle');
       setMsg(e.message || 'Could not start the payment. Try again in a moment.');
     }

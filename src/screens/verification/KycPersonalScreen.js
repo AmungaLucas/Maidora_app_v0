@@ -33,6 +33,7 @@ import {
   formatDate,
   normalizeDraft,
 } from './kycShared';
+import { kycLog } from '../../kycLog';
 
 export default function KycPersonalScreen({ navigation, route }) {
   const { token } = useApp();
@@ -54,6 +55,13 @@ export default function KycPersonalScreen({ navigation, route }) {
   const saveTimer = useRef(null);
   const dirtyRef = useRef(false);
 
+  useEffect(() => {
+    kycLog(
+      `step 1 · personal details (dob=${draft.dateOfBirth || '∅'} gender=${draft.gender || '∅'})`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // §7 profile prefill — when the KYC draft lacks DOB/gender, the profile
   // wizard may already hold them (same lowercase enum). Fills ONLY empty
   // fields and never marks the form dirty (the autosave stays quiet until
@@ -66,6 +74,10 @@ export default function KycPersonalScreen({ navigation, route }) {
         const res = await api.getProfile(token);
         const p = res && res.profile;
         if (!p || !alive) return;
+        const filled = [p.dateOfBirth && !draft.dateOfBirth ? 'dob' : null, p.gender && !draft.gender ? 'gender' : null]
+          .filter(Boolean)
+          .join(' + ');
+        if (filled) kycLog(`profile prefill: ${filled}`);
         if (!draft.dateOfBirth && p.dateOfBirth) {
           setDob((cur) => cur || p.dateOfBirth);
         }
@@ -98,9 +110,11 @@ export default function KycPersonalScreen({ navigation, route }) {
           },
           token
         );
+        kycLog('draft autosaved (debounce 1.5s)');
         setSaveNote('Saved');
         setTimeout(() => setSaveNote(''), 1500);
-      } catch {
+      } catch (e) {
+        kycLog(`draft autosave FAILED — ${e.message || e} (re-validated on Continue)`);
         /* silent — validated again on Continue and on submit */
       }
     }, 1500);
@@ -133,21 +147,27 @@ export default function KycPersonalScreen({ navigation, route }) {
       }
     }
     setErrors(errs);
-    if (Object.keys(errs).length) return;
+    if (Object.keys(errs).length) {
+      kycLog(`personal: blocked — ${Object.keys(errs).join(', ')}`);
+      return;
+    }
 
     setBusy(true);
     setBanner('');
+    kycLog(`personal: continue — saving (idNumber=${idNumber.trim().slice(0, 2)}•• age=${calcAge(dob)})`);
     try {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       await api.kycSaveDraft(
         { fullNameAsOnId: trimmedName, idNumber: idNumber.trim(), dateOfBirth: dob, gender },
         token
       );
+      kycLog(`personal: saved → ${draft.idType ? 'photos checklist' : 'doc type'}`);
       navigation.navigate(
         draft.idType ? 'KycCapture' : 'KycDocType',
         { draft: { ...draft, fullNameAsOnId: trimmedName, idNumber: idNumber.trim(), dateOfBirth: dob, gender } }
       );
     } catch (e) {
+      kycLog(`personal: save FAILED — ${e.message || e}`);
       setBanner(e.message || 'Could not save. Check your connection and try again.');
     } finally {
       setBusy(false);

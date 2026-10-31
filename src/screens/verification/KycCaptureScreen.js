@@ -32,6 +32,7 @@ import {
   s as ks,
 } from './kycShared';
 import GuidedCapture from './GuidedCapture';
+import { kbOf, kycLog } from '../../kycLog';
 
 const ITEM_COPY = {
   id_front: {
@@ -77,18 +78,30 @@ export default function KycCaptureScreen({ navigation, route }) {
 
   const items = itemsFor(draft.idType);
 
+  useEffect(() => {
+    kycLog(
+      `step 3 · photos checklist — ${items.map((it) => it.field).join(' + ')}` +
+        `${returnTo ? ` · returnTo=${returnTo}` : ''}`
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Retake from KycReview: open the focused item's capture immediately.
   useEffect(() => {
     const focus = route.params?.focus;
     if (!focus || openedFocus.current) return;
     openedFocus.current = true;
     navigation.setParams({ focus: null });
+    kycLog(`review retake → ${focus} (opening capture)`);
     openCapture(focus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.focus]);
 
   function openCapture(field) {
     setBanner('');
+    kycLog(
+      `capture open · ${field}` + (field === 'selfie' ? ' (live selfie — gallery off)' : ' (source sheet)')
+    );
     if (field === 'selfie') {
       setCam({ field, mode: 'selfie', startWithGallery: false });
     } else {
@@ -99,12 +112,15 @@ export default function KycCaptureScreen({ navigation, route }) {
   async function upload(field, shot) {
     setUploadState((m) => ({ ...m, [field]: 'uploading' }));
     setBanner('');
+    const t0 = Date.now();
     try {
       await api.mediaKycUpload(field, shot.base64, shot.mime, token);
+      kycLog(`upload OK · ${field} in ${Date.now() - t0}ms (${kbOf(shot.base64)} ${shot.mime})`);
       setDraft((d) => ({ ...d, images: { ...d.images, [IMG_KEY[field]]: shot.uri } }));
       setUploadState((m) => ({ ...m, [field]: 'idle' }));
       return true;
     } catch (e) {
+      kycLog(`upload FAILED · ${field} after ${Date.now() - t0}ms — ${e.message || e}`);
       setUploadState((m) => ({ ...m, [field]: 'failed' }));
       setBanner(
         (e.message || 'Upload failed. Check your connection and try again.') +
@@ -117,6 +133,7 @@ export default function KycCaptureScreen({ navigation, route }) {
   function onGuidedResult(shot) {
     const field = cam?.field;
     if (!field || !shot) return;
+    kycLog(`shot ready · ${field} ${shot.mime || '?'} ${kbOf(shot.base64)} → upload`);
     setShots((m) => ({ ...m, [field]: shot }));
     upload(field, shot);
   }
@@ -134,9 +151,11 @@ export default function KycCaptureScreen({ navigation, route }) {
 
   function onContinue() {
     if (!allDone) {
+      kycLog(`photos: continue blocked — not done: ${items.filter((it) => statusFor(it.field) !== 'done').map((it) => it.field).join(', ')}`);
       setBanner('Capture every photo above — we upload each one before the review.');
       return;
     }
+    kycLog(`photos: all done → ${returnTo || 'KycReview'}`);
     if (returnTo) navigation.navigate(returnTo, { draft });
     else navigation.navigate('KycReview', { draft });
   }
@@ -204,14 +223,20 @@ export default function KycCaptureScreen({ navigation, route }) {
             icon: 'camera-outline',
             label: 'Take photo',
             sub: 'Follow the on-screen guide frame',
-            onPress: () => setCam({ field: sheetField, mode: 'doc', startWithGallery: false }),
+            onPress: () => {
+              kycLog(`source · ${sheetField} → camera`);
+              setCam({ field: sheetField, mode: 'doc', startWithGallery: false });
+            },
           },
           {
             key: 'gallery',
             icon: 'images-outline',
             label: 'Choose from gallery',
             sub: 'Center-cropped to the same frame',
-            onPress: () => setCam({ field: sheetField, mode: 'doc', startWithGallery: true }),
+            onPress: () => {
+              kycLog(`source · ${sheetField} → gallery`);
+              setCam({ field: sheetField, mode: 'doc', startWithGallery: true });
+            },
           },
         ]}
       />

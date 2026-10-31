@@ -31,6 +31,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius } from '../../theme';
 import BrandLoader from '../../components/brand/BrandLoader';
+import { kbOf, kycLog } from '../../kycLog';
 import {
   centerCropForAspect,
   cropToWebp,
@@ -179,6 +180,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
       try {
         const p = await Camera.requestCameraPermissionsAsync();
         const state = p.granted ? 'granted' : 'denied';
+        kycLog(`camera: permission ${state} (mode=${mode})`);
         setPerm(state);
         // Gallery auto-start: wait out the modal slide-in so the OS picker
         // never races the animation on Android.
@@ -186,6 +188,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
           setTimeout(() => runGallery(), 350);
         }
       } catch {
+        kycLog('camera: permission request crashed — treating as denied');
         setPerm('denied');
       }
     })();
@@ -205,9 +208,11 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
   async function runGallery() {
     if (busy) return;
     setError('');
+    kycLog(`camera: gallery pick (mode=${mode})`);
     try {
       const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!granted) {
+        kycLog('camera: gallery permission denied');
         setError('Photo access is off for Maidora. Enable it in Settings to pick from the gallery.');
         return;
       }
@@ -216,14 +221,19 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
         allowsEditing: false, // we crop to the guide frame ourselves
         quality: 0.95,
       });
-      if (r.canceled || !r.assets?.length) return;
+      if (r.canceled || !r.assets?.length) {
+        kycLog('camera: gallery canceled');
+        return;
+      }
       const a = r.assets[0];
       setBusy(true);
       const rect = centerCropForAspect(a, cfg.aspect);
       const out = await cropToWebp(a, rect, cfg.maxW);
+      kycLog(`camera: gallery center-crop ${rect.width}x${rect.height} → ${out.mime} ${kbOf(out.base64)}`);
       setResult(out);
       setStage('confirm');
     } catch (e) {
+      kycLog(`camera: gallery FAILED — ${e?.message || e}`);
       setError(e?.message || 'Could not load that photo. Try another one.');
     } finally {
       setBusy(false);
@@ -234,6 +244,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
     if (busy || !camRef.current) return;
     setError('');
     setBusy(true);
+    kycLog(`camera: shutter (mode=${mode})`);
     try {
       const photo = await camRef.current.takePictureAsync({
         quality: 0.95,
@@ -241,13 +252,16 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
         skipProcessing: false, // keep EXIF orientation handling
       });
       if (!photo?.uri) throw new Error('The camera did not return a photo. Try again.');
+      kycLog(`camera: shot returned ${photo.width}x${photo.height}`);
       const crop =
         frameCropForPhoto(frame, container, photo) || centerCropForAspect(photo, cfg.aspect);
       if (!crop) throw new Error('Could not crop to the frame. Try again.');
       const out = await cropToWebp(photo, crop, cfg.maxW);
+      kycLog(`camera: frame crop ${crop.width}x${crop.height} → ${out.mime} ${kbOf(out.base64)}`);
       setResult(out);
       setStage('confirm'); // unmounts the CameraView
     } catch (e) {
+      kycLog(`camera: shot FAILED — ${e?.message || e}`);
       setError(e?.message || 'Capture failed. Try again.');
     } finally {
       setBusy(false);
@@ -256,14 +270,18 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
 
   function usePhoto() {
     if (!result) return;
+    kycLog(`camera: photo accepted (${mode}) — handing to caller`);
     onClose?.();
     if (onResult) setTimeout(() => onResult(result), 60);
   }
 
   function backToCamera() {
+    // 2026-10-31 fix: this used to call setShotDims(null) — a leftover from a
+    // removed state variable. Calling an undefined identifier threw
+    // "ReferenceError: Property 'setShotDims' doesn't exist" on every Retake.
+    kycLog(`camera: retake (${mode}) — back to viewfinder`);
     setStage('camera');
     setResult(null);
-    setShotDims(null);
     setError('');
   }
 

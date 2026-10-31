@@ -1,16 +1,22 @@
 // KYC step 7 — confirmation (§33.1 step 8): "Submitted. Notify within 72
 // hours." + the urgent upsell when the submission went in without it.
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { PrimaryButton, Screen, ScreenHeader } from '../../ui';
 import { UrgentUpsell } from './KycIntroScreen';
+import { kycLog } from '../../kycLog';
 
 export default function KycDoneScreen({ navigation, route }) {
   const { token, user } = useApp();
   const urgent = route.params?.urgent ?? !!user?.kycUrgent;
+
+  useEffect(() => {
+    kycLog(`done — submission received${urgent ? ' (urgent)' : ''} · flow complete`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Screen>
