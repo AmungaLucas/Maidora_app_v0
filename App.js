@@ -94,8 +94,18 @@ function RootNavigator() {
   else if (token && user) initialRoute = user.role ? tabsRouteFor(user) : 'RoleSelect';
   else if (onboardingComplete) initialRoute = 'Login';
 
+  // KEY-REMOUNT ON AUTH FLIPS (logout fix, owner report 2026-10-31):
+  // React Navigation ignores initialRouteName changes on an already-mounted
+  // navigator, so signing out used to strand the UI on the tabs with no
+  // session. Keying the navigator on the signed-in STATE makes the whole
+  // stack rebuild from the recomputed initial route (Login / RoleSelect /
+  // tabs) the moment token+user flip — the same reason logOut in the drawer
+  // and Settings now calls signOut() with no navigation calls. Keying on the
+  // STATE (not the raw token) keeps token REFRESHES (/me) remount-free.
+  const authKey = token && user ? 'in' : 'out';
   return (
     <Stack.Navigator
+      key={authKey}
       initialRouteName={initialRoute}
       screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
     >

@@ -2,11 +2,14 @@
 import React from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { LINKS, colors, radius } from '../../theme';
-import { PrimaryButton, Screen } from '../../ui';
+import { PrimaryButton, Screen, ScreenHeader } from '../../ui';
 
 export default function ForgotPasswordScreen({ navigation }) {
   return (
     <Screen>
+      {/* Back-only header row — the title stays in the content (ScreenHeader
+          hides the back arrow itself when the stack has nothing behind it). */}
+      <ScreenHeader navigation={navigation} />
       <Text style={styles.title}>Reset your password</Text>
       <Text style={styles.body}>
         Password resets are sent by email or SMS. We are switching on automated delivery right

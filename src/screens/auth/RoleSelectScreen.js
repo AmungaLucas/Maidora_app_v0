@@ -10,7 +10,7 @@ import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { tabsRouteFor } from '../../navigation/Tabs';
 import { colors, radius } from '../../theme';
-import { Banner, PrimaryButton, Screen } from '../../ui';
+import { Banner, PrimaryButton, Screen, ScreenHeader } from '../../ui';
 
 const OPTIONS = [
   {
@@ -56,6 +56,9 @@ export default function RoleSelectScreen({ navigation, route }) {
 
   return (
     <Screen>
+      {/* Back-only header row — the title stays in the content (ScreenHeader
+          hides the back arrow itself when the stack has nothing behind it). */}
+      <ScreenHeader navigation={navigation} />
       <View style={styles.header}>
         <Text style={styles.title}>
           {onboardingMode ? 'Welcome to Maidora!' : 'How will you use Maidora?'}

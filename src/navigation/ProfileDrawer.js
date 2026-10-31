@@ -55,11 +55,14 @@ function BrandDrawerContent({ navigation, state }) {
 
   const go = (route) => navigation.navigate(route);
 
-  // resetRoot acts on the ROOT stack (drawer → tabs → root), landing the
-  // signed-out user back on Login regardless of where the drawer was open.
+  // signOut flips the auth state in AppContext → the ROOT Stack.Navigator
+  // key changes ('in' → 'out') and the whole stack remounts on the computed
+  // initial route (Login). The old code called navigation.resetRoot here —
+  // that helper exists on STACK navigators only, and the drawer-content
+  // navigation is a DRAWER object, so logout threw
+  // "TypeError: undefined is not a function" (owner report 2026-10-31).
   const logOut = () => {
     signOut();
-    navigation.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
   };
 
   return (

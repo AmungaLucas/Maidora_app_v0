@@ -84,6 +84,7 @@ export default function KycReviewScreen({ navigation, route }) {
         step={4}
         title="Review your submission"
         subtitle="Check everything — retake any item before submitting"
+        navigation={navigation}
       >
         <Banner kind="error" message={banner} />
 

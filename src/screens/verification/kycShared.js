@@ -288,7 +288,7 @@ export async function cropToWebp(picked, crop, maxW = 1400, flipH = false) {
 }
 
 // ---- shell -----------------------------------------------------------------
-export function KycShell({ step, title, subtitle, children }) {
+export function KycShell({ step, title, subtitle, navigation, children }) {
   return (
     <View style={s.flex}>
       <View style={s.progressWrap}>
@@ -297,7 +297,9 @@ export function KycShell({ step, title, subtitle, children }) {
         </View>
         <Text style={s.progressText}>Step {step} of {KYC_TOTAL_STEPS}</Text>
       </View>
-      <ScreenHeader eyebrow="Identity verification" title={title} subtitle={subtitle} />
+      {/* navigation → ScreenHeader renders the back arrow on the root stack
+          (owner rule: back button on every non-tab screen). */}
+      <ScreenHeader eyebrow="Identity verification" title={title} subtitle={subtitle} navigation={navigation} />
       {children}
     </View>
   );

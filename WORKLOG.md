@@ -6,6 +6,64 @@
 
 ---
 
+## 2026-10-31 — Back-button headers everywhere + logout crash fix + interactive avatar crop editor (owner requests)
+
+Three owner directives in one round: "remember we are using react navigation —
+we need to have headers with back button in all non-tab screens"; "for the
+profile screen have a header and move the hamburger menu to the header"; a
+logout crash (`TypeError: undefined is not a function`); and "for the profile
+pic upload the camera needs to be different where we can crop, zoom or
+reposition the image within that circle".
+
+- **Logout crash (root cause)**: `ProfileDrawer.logOut` and
+  `SettingsScreen.logOut` called `navigation.resetRoot(...)` — that helper
+  exists on STACK navigators only. The drawer-content navigation is a DRAWER
+  object (no `resetRoot`), and Settings renders BOTH as a root-stack screen
+  and inside the drawer, so logout threw `undefined is not a function` from
+  either entry point. Fix: both `logOut`s now call `signOut()` only, and the
+  root `Stack.Navigator` in `App.js` is keyed on the signed-in STATE
+  (`token && user ? 'in' : 'out'`) — when auth flips, the whole stack
+  remounts on the recomputed initial route (Login after logout; RoleSelect /
+  tabs after sign-in). React Navigation ignores `initialRouteName` changes
+  on a mounted navigator, which is why the navigation-call approach existed
+  at all. Keying on STATE (not the raw token) keeps `/me` token refreshes
+  remount-free; the post-signIn `navigation.reset(...)` calls in Login/OTP
+  run before the context commit and land on the same route the remount
+  computes — no race.
+- **Headers with back button (all non-tab screens)**: `ScreenHeader` (ui.js)
+  is now the ONE branded header with a smart left slot — HAMBURGER when the
+  screen is inside the Profile drawer (`navigation.openDrawer` exists),
+  BACK ARROW on root-stack screens when `navigation.canGoBack()` (so flow
+  roots like Login-as-logout-target render no back), `onBack` override +
+  `back={false}` opt-out. Wired: auth screens get back-only rows (their
+  titles stay in the content) — Login, Signup, OTP, Forgot password, Role
+  select; Settings / Payment / KycIntro dropped their ad-hoc right-slot
+  hamburgers for `navigation={navigation}`; the four KYC step screens
+  (Personal, Doc type, Photos, Review) get the arrow through `KycShell`.
+  Exceptions by design: Splash, Welcome (auth root — nothing behind) and
+  KycDone (terminal — "Done" pops to top). Profile's header IS the
+  hamburger: rebuilt on `ScreenHeader` with the drawer hamburger in the
+  left slot and "Profile" as the title (owner directive), replacing the old
+  bespoke row; Settings' bespoke header row removed the same way.
+- **Interactive avatar crop editor (new `AvatarAdjust` stage)**: avatar
+  captures no longer auto-center-crop. After the shutter or a gallery pick,
+  GuidedCapture (avatar mode only) hands the FULL photo to a new
+  `AvatarAdjust` stage — square viewport, circular gold ring, scrim outside
+  (same evenodd SVG trick as the camera guide) — where the user DRAGS to
+  reposition and PINCHES to zoom (1×–4×). Pan/pinch run on the UI thread
+  (RNGH Gesture API + Reanimated shared values; the stage carries its own
+  `GestureHandlerRootView` because RN Modals render outside the app-root
+  handler on Android); translations are clamped so the circle is always
+  fully covered. "Use photo" maps the visible circle back into the image's
+  pixel space (unit-tested: rect always inside bounds, always square, for
+  portrait/landscape/square/small photos at every zoom) and `cropToWebp`
+  encodes ≤600 px WebP exactly as before. Android front-camera shots are
+  shown MIRRORED (scaleX −1) so positioning is WYSIWYG; the crop rect stays
+  in that mirrored space and `cropToWebp(..., flipH)` flips the original
+  first, then crops — no double encode. Retake returns to the viewfinder;
+  [KYC] trace logs the crop (`avatar adjust crop WxH → mime KB`). Doc and
+  selfie flows are untouched (stage exists only for `mode='avatar'`).
+
 ## 2026-10-31 — Employer Profile crash: `filter of undefined` (owner report)
 
 Owner report: on the **employer** account, `TypeError: Cannot read property

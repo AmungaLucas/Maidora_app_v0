@@ -42,6 +42,7 @@ import {
   cropToWebp,
   frameCropForPhoto,
 } from './kycShared';
+import AvatarAdjust from './AvatarAdjust';
 
 const MODES = {
   doc: {
@@ -163,7 +164,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
   const insets = useSafeAreaInsets();
   const camRef = useRef(null);
 
-  const [stage, setStage] = useState('camera'); // camera | confirm
+  const [stage, setStage] = useState('camera'); // camera | adjust | confirm
   const [perm, setPerm] = useState(null); // 'granted' | 'denied' | 'undetermined'
   const [facing, setFacing] = useState(cfg.facing); // live front ↔ back toggle
   const [container, setContainer] = useState(null);
@@ -171,6 +172,10 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
   const [error, setError] = useState('');
   const [torch, setTorch] = useState(false);
   const [result, setResult] = useState(null);
+  // Avatar mode ONLY — the full (uncropped) photo handed to the interactive
+  // AvatarAdjust stage: { photo: {uri,width,height}, flip } where flip is
+  // the Android front-camera mirror flag (matches the preview).
+  const [pendingShot, setPendingShot] = useState(null);
   const galleryRef = useRef(startWithGallery);
 
   // Fresh state every time the modal opens.
@@ -178,6 +183,7 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
     if (!visible) return;
     setStage('camera');
     setResult(null);
+    setPendingShot(null);
     setError('');
     setTorch(false);
     setBusy(false);
@@ -234,6 +240,14 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
       }
       const a = r.assets[0];
       setBusy(true);
+      // Avatar mode skips the center-crop: the FULL pick goes to the
+      // interactive AvatarAdjust stage (owner request — crop/zoom/reposition
+      // inside the circle there).
+      if (mode === 'avatar') {
+        setPendingShot({ photo: { uri: a.uri, width: a.width, height: a.height }, flip: false });
+        setStage('adjust');
+        return;
+      }
       const rect = centerCropForAspect(a, cfg.aspect);
       const out = await cropToWebp(a, rect, cfg.maxW);
       kycLog(`camera: gallery center-crop ${rect.width}x${rect.height} → ${out.mime} ${kbOf(out.base64)}`);
@@ -260,6 +274,14 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
       });
       if (!photo?.uri) throw new Error('The camera did not return a photo. Try again.');
       kycLog(`camera: shot returned ${photo.width}x${photo.height}`);
+      // Avatar mode → interactive adjust stage with the FULL photo (no frame
+      // crop here — the user positions and zooms inside the circle next).
+      if (mode === 'avatar') {
+        const flip = facing === 'front' && Platform.OS === 'android';
+        setPendingShot({ photo: { uri: photo.uri, width: photo.width, height: photo.height }, flip });
+        setStage('adjust');
+        return;
+      }
       const crop =
         frameCropForPhoto(frame, container, photo) || centerCropForAspect(photo, cfg.aspect);
       if (!crop) throw new Error('Could not crop to the frame. Try again.');
@@ -281,9 +303,33 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
 
   function usePhoto() {
     if (!result) return;
+    acceptResult(result);
+  }
+
+  function acceptResult(out) {
     kycLog(`camera: photo accepted (${mode}) — handing to caller`);
     onClose?.();
-    if (onResult) setTimeout(() => onResult(result), 60);
+    if (onResult) setTimeout(() => onResult(out), 60);
+  }
+
+  // AvatarAdjust "Use photo" — map the visible circle onto the photo's
+  // pixels and encode WebP. The rect is in the DISPLAYED (mirrored when
+  // flip) space; cropToWebp flips the ORIGINAL first and then crops with
+  // the same rect, so the result is exactly what the user positioned.
+  async function useAdjusted(rect) {
+    if (!pendingShot || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const out = await cropToWebp(pendingShot.photo, rect, cfg.maxW, pendingShot.flip);
+      kycLog(`camera: avatar adjust crop ${rect.width}x${rect.height}${pendingShot.flip ? ' (mirrored to match preview)' : ''} → ${out.mime} ${kbOf(out.base64)}`);
+      acceptResult(out);
+    } catch (e) {
+      kycLog(`camera: avatar crop FAILED — ${e?.message || e}`);
+      setError(e?.message || 'Could not crop that photo. Try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   function backToCamera() {
@@ -293,12 +339,13 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
     kycLog(`camera: retake (${mode}) — back to viewfinder`);
     setStage('camera');
     setResult(null);
+    setPendingShot(null);
     setError('');
   }
 
   function onRequestClose() {
     if (busy) return;
-    if (stage === 'confirm') backToCamera();
+    if (stage === 'confirm' || stage === 'adjust') backToCamera();
     else onClose?.();
   }
 
@@ -460,6 +507,16 @@ export default function GuidedCapture({ visible, mode = 'doc', startWithGallery 
               <Text style={styles.permCancelText}>Not now</Text>
             </Pressable>
           </View>
+        ) : stage === 'adjust' ? (
+          /* ---- avatar ADJUST stage (owner request 2026-10-31) — drag to
+             reposition, pinch to zoom, exact circle crop on Use photo ---- */
+          <AvatarAdjust
+            photo={pendingShot?.photo}
+            flipDisplay={!!pendingShot?.flip}
+            busy={busy}
+            onRetake={backToCamera}
+            onUse={useAdjusted}
+          />
         ) : (
           /* ---- confirm stage ---- */
           <View style={[styles.centerFill, { paddingTop: insets.top || 12, paddingBottom: insets.bottom || 12 }]}>

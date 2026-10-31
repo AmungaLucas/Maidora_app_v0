@@ -8,7 +8,7 @@ import { useApp } from '../../context/AppContext';
 import { captureCurrentLocation } from '../../location';
 import { LINKS, colors, radius } from '../../theme';
 import { validateSignup } from '../../validation';
-import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
+import { Banner, PrimaryButton, Screen, ScreenHeader, TextField } from '../../ui';
 
 export default function SignupScreen({ navigation }) {
   const { setPendingReg } = useApp();
@@ -91,6 +91,9 @@ export default function SignupScreen({ navigation }) {
 
   return (
     <Screen>
+      {/* Back-only header row — the title stays in the content (ScreenHeader
+          hides the back arrow itself when the stack has nothing behind it). */}
+      <ScreenHeader navigation={navigation} />
       <Text style={styles.title}>Create your account</Text>
       <Text style={styles.subtitle}>
         We will send a 6-digit code to your phone to verify it. You will pick

@@ -188,6 +188,7 @@ export default function KycPersonalScreen({ navigation, route }) {
         step={1}
         title="Personal details"
         subtitle="Exactly as they appear on your ID"
+        navigation={navigation}
       >
         <Banner kind="error" message={banner} />
         <TextField

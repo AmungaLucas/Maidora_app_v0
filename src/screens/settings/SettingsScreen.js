@@ -5,8 +5,7 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
 import { LINKS, ROLES, colors, radius } from '../../theme';
-import { BottomSheetModal, Screen } from '../../ui';
-import DrawerMenuButton from '../../components/common/DrawerMenuButton';
+import { BottomSheetModal, Screen, ScreenHeader } from '../../ui';
 
 export default function SettingsScreen({ navigation }) {
   const { user, signOut } = useApp();
@@ -21,26 +20,20 @@ export default function SettingsScreen({ navigation }) {
     Linking.openURL(`mailto:${LINKS.supportEmail}?subject=${subject}`).catch(() => {});
   };
 
+  // signOut flips the auth state in AppContext → the root Stack.Navigator's
+  // key changes and the stack REMOUNTS on the computed initial route (Login).
+  // No resetRoot here: it exists on STACK navigation only, and this screen
+  // also renders INSIDE the Profile drawer, where navigation.resetRoot is
+  // undefined — calling it threw "TypeError: undefined is not a function"
+  // on every logout (owner report 2026-10-31).
   const logOut = () => {
     signOut();
-    navigation.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
   };
-
-  // Inside the Profile drawer → hamburger; root-stack copy → back arrow.
-  const inDrawer = typeof navigation.openDrawer === 'function';
 
   return (
     <Screen keyboard={false}>
-      <View style={styles.header}>
-        {inDrawer ? (
-          <DrawerMenuButton navigation={navigation} />
-        ) : (
-          <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
-            <Ionicons name="arrow-back" size={24} color={colors.forest} />
-          </Pressable>
-        )}
-        <Text style={styles.headerTitle}>Settings</Text>
-      </View>
+      {/* Header — hamburger inside the drawer, back arrow on the root stack. */}
+      <ScreenHeader navigation={navigation} title="Settings" />
 
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Account</Text>
@@ -104,8 +97,6 @@ function InfoRow({ icon, label, value, last = false }) {
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
-  headerTitle: { fontSize: 20, fontWeight: '800', color: colors.ink },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

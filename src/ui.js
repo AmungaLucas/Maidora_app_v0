@@ -16,6 +16,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import BrandLoader from './components/brand/BrandLoader';
+import DrawerMenuButton from './components/common/DrawerMenuButton';
 import { colors, radius } from './theme';
 
 // Screen — safe-area wrapper used by every screen.
@@ -236,15 +237,51 @@ export function BottomSheetModal({ visible, onClose, children }) {
   );
 }
 
-export function ScreenHeader({ eyebrow, title, subtitle, right }) {
+// ScreenHeader — the ONE branded header for every non-tab screen.
+// Left slot (owner rule 2026-10-31 — headers with a back button on ALL
+// non-tab screens):
+//   · inside the Profile drawer (navigation.openDrawer exists) → HAMBURGER
+//     (the drawer owns navigation there — there is nothing to go back to);
+//   · on a root-stack screen → BACK ARROW when the stack can go back
+//     (navigation.canGoBack()); first screens of a flow (e.g. Login as the
+//     post-logout root) render no back — there is nothing behind them;
+//   · `onBack` overrides the default goBack; `back={false}` hides it.
+// Pass `navigation` from the screen; title/subtitle/eyebrow/right stay
+// optional (auth screens use a back-only row and keep their in-content
+// titles).
+export function ScreenHeader({ eyebrow, title, subtitle, right, navigation, onBack, back }) {
+  const inDrawer = !!navigation && typeof navigation.openDrawer === 'function';
+  const canBack =
+    !inDrawer &&
+    !!navigation &&
+    (typeof navigation.canGoBack !== 'function' || navigation.canGoBack());
+  const showBack = back === true || (back !== false && (onBack || canBack));
+  const empty = !showBack && !inDrawer && !eyebrow && !title && !subtitle && !right;
+  if (empty) return null;
   return (
     <View style={styles.headerWrap}>
       {eyebrow ? <Text style={styles.headerEyebrow}>{eyebrow}</Text> : null}
       <View style={styles.headerRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>{title}</Text>
-          {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
-        </View>
+        {showBack ? (
+          <Pressable
+            style={styles.headerBtn}
+            hitSlop={8}
+            onPress={onBack || (() => navigation.goBack())}
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={22} color={colors.forest} />
+          </Pressable>
+        ) : inDrawer ? (
+          <DrawerMenuButton navigation={navigation} />
+        ) : null}
+        {title || subtitle ? (
+          <View style={{ flex: 1 }}>
+            {title ? <Text style={styles.headerTitle}>{title}</Text> : null}
+            {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+          </View>
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
         {right}
       </View>
     </View>
@@ -381,6 +418,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: { fontSize: 24, fontWeight: '800', color: colors.ink },
   headerSubtitle: { marginTop: 4, fontSize: 14, color: colors.muted, lineHeight: 20 },
   emptyWrap: {

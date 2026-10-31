@@ -61,7 +61,6 @@ import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton, SecondaryButton, Screen, ScreenHeader, TextField } from '../../ui';
-import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 
 const AMOUNTS = [1, 50, 100, 200, 500];
 const POLL_MS = 4000;
@@ -502,7 +501,7 @@ export default function PaymentScreen({ navigation }) {
         eyebrow="M-Pesa · Live"
         title="Pay with M-Pesa"
         subtitle="STK Push via Safaricom Daraja. Real money moves — test with KES 1 first."
-        right={<DrawerMenuButton navigation={navigation} />}
+        navigation={navigation}
       />
 
       <Banner message={error} />

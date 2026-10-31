@@ -9,7 +9,7 @@ import { captureCurrentLocation } from '../../location';
 import { tabsRouteFor } from '../../navigation/Tabs';
 import { colors, radius } from '../../theme';
 import { isValidEmail, isValidPhone } from '../../validation';
-import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
+import { Banner, PrimaryButton, Screen, ScreenHeader, TextField } from '../../ui';
 
 export default function LoginScreen({ navigation }) {
   const { signIn, setPendingReg } = useApp();
@@ -85,6 +85,9 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <Screen>
+      {/* Back-only header row — the title stays in the content (ScreenHeader
+          hides the back arrow itself when the stack has nothing behind it). */}
+      <ScreenHeader navigation={navigation} />
       <Text style={styles.title}>Welcome back</Text>
       <Text style={styles.subtitle}>Log in to your Maidora account.</Text>
 

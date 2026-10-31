@@ -23,9 +23,9 @@ import {
   PrimaryButton,
   ProgressBar,
   Screen,
+  ScreenHeader,
   TextField,
 } from '../../ui';
-import DrawerMenuButton from '../../components/common/DrawerMenuButton';
 import ActionSheet from '../../components/common/ActionSheet';
 import GuidedCapture from '../verification/GuidedCapture';
 import CompletenessWizard from './CompletenessWizard';
@@ -97,11 +97,10 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
-      {/* Header — hamburger LEFT (drawer opens from the left) */}
-      <View style={styles.header}>
-        <DrawerMenuButton navigation={navigation} />
-        <Text style={styles.headerTitle}>Profile</Text>
-      </View>
+      {/* Header — hamburger lives IN the header (owner 2026-10-31): the shared
+          ScreenHeader shows the drawer hamburger here and a back arrow when
+          this screen stack-navigates outside the drawer. */}
+      <ScreenHeader navigation={navigation} title="Profile" />
 
       {/* 1 — Identity (tap the avatar to add/change the profile photo) */}
       <View style={styles.identityCard}>
@@ -476,14 +475,6 @@ function EmailVerifySheet({ visible, onClose, user, token }) {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingTop: 14,
-    paddingBottom: 16,
-  },
-  headerTitle: { fontSize: 24, fontWeight: '800', color: colors.ink, flex: 1 },
   // Identity card
   identityCard: {
     alignItems: 'center',
