@@ -15,6 +15,10 @@ const paymentsRoutes = require('./src/routes/payments');
 const profileRoutes = require('./src/routes/profile');
 const kycRoutes = require('./src/routes/kyc');
 const mediaRoutes = require('./src/routes/media');
+const maidsRoutes = require('./src/routes/maids');
+const jobsRoutes = require('./src/routes/jobs');
+const chatRoutes = require('./src/routes/chat');
+const applicationsRoutes = require('./src/routes/applications');
 
 const app = express();
 
@@ -44,6 +48,12 @@ app.use('/api', healthRoutes); // /api/health (contract monitored externally), /
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/profile', profileRoutes);
+// Marketplace (unified spec §9/§10/§15.1): maid search, jobs + applications,
+// chat. All requireAuth; service routes gate themselves with requireVerified.
+app.use('/api/maids', maidsRoutes);
+app.use('/api/jobs', jobsRoutes);
+app.use('/api/applications', applicationsRoutes);
+app.use('/api/chat', chatRoutes);
 
 // 404
 app.use((req, res) => {

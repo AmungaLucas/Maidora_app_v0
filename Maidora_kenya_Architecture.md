@@ -49,9 +49,10 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Pricing table `payment_purposes` (§9) | ✅ LIVE | migrate_v5 (2026-10-31): purpose catalog moved OUT of the app into the DB — label, description, `amount_kes` (NULL = any), audience, STK labels, `is_active`, `sort_order`. `GET /api/payments/purposes` feeds the app picker (owner changes prices with NO app release) **and — 2026-10-31 — the KYC intro's urgent upsell reads the same endpoint live, so DB repricing shows on the app's next visit**; stk-push validates (unknown→400, inactive→409) and **enforces fixed prices server-side**; purpose label joined onto payment views so the success screen shows "Maid Gold · KES 500". Seeded: app_test any · kyc_urgent 150 (owner-confirmed, owner has since test-repriced to 5 live) · profile_boost 100 · maid_basic 200 · maid_gold 500 · employer_gold 500 (provisional); application/application_boost seeded INACTIVE. E2E 22/22 |
 | Media pipeline `media.maidora.co.ke` (§5.5) | ✅ LIVE | Owner-created subdomain; `POST /media/avatar` (public, unguessable names, immutable cache) + `POST /media/kyc/:field` (web-DENIED dir, authenticated stream only). Base64 JSON ≤5 MB, magic-byte sniff (WebP/JPEG/PNG), sha256, `media_assets` audit rows, old-file replace. **Read paths 2026-10-31**: raw stream + `?format=base64` JSON envelope (the app's thumbnails — header-authed `<Image>` fails silently on device). Client converts captures to **WebP** before upload (≤1400 px docs / ≤900 px selfie / ≤600 px avatar) and mirrors front-camera shots to match the preview. Avatar upload wired into ProfileScreen (camera-badge button) + drawer identity header. LiteSpeed uid trap solved (avatars 0644, KYC 0600). E2E 22/22 incl. deny + magic checks; `deploy_kyc_img.py` re-verified both read paths |
 | Brand action sheet + edge-to-edge layout fix (owner request 2026-10-31) | ✅ LIVE | **ActionSheet** (`src/components/common/ActionSheet.js`) — brand-styled bottom sheet (handle, icon rows, cancel, nav-bar inset) replaces OS Alert choosers: document "Add photo" (take photo / gallery), profile-photo chooser, and gallery-permission guidance. **Root layout**: the KYC screens rendered raw ScrollViews and sat **edge-to-edge under the status bar AND the Android nav bar** (`edgeToEdgeEnabled: true`) — all four now render inside the safe-area `Screen` wrapper (top/left/right/bottom insets). Rule added to §4.5: every screen roots in `Screen`, never a bare ScrollView |
-| Paywall after 2 applications (§9) | ⏳ PENDING | Needs applications first |
-| Visibility decay ranking (§10) | ⏳ PENDING | `last_active_at` collected; ranking ships with search |
-| Real chat backend | ⏳ PENDING | Chats tab is a placeholder |
+| Paywall after 2 applications (§9) | ✅ ENFORCED (top-up payment pending) | Every application ever submitted (any status, incl. withdrawn/rejected) consumes one of the 2 lifetime free credits (COUNT-derived, no column); the 3rd lands **402 `paywall_required`** → the app shows the paywall sheet (top-up via M-Pesa lands with the next release — `application` purpose seeded INACTIVE in `payment_purposes`, flip `is_active=1` to switch on). E2E-proven live: apply 201 credits 1→0 · duplicate 409 · 3rd 402 · withdraw keeps the credit consumed |
+| Maid discovery + visibility decay (§10) | ✅ LIVE | `GET /api/maids` (browse + search: q, county, job_type, min_experience, max_salary, verified, page) + `GET /api/maids/:id` public profile (NO contact details — chat is the only path in). Decay reads `users.last_active_at`: **0–13d active → ranked first · 14–29d quiet → ranked below active · 30–59d dormant → hidden from default browse, findable when `q` present · 60d+ archived → never listed** (threads/applications stay live via direct ids). `lastActiveLabel` computed server-side ("Active today", "Last active 2 weeks ago", …); response carries a `counties` meta so the app only offers filter chips with maids behind them |
+| Real chat backend | ✅ LIVE | `chat_threads` (ordered-pair UNIQUE) + `chat_messages` (read_at). **Polling, not websockets** (cPanel Passenger): `POST /chat/threads` find-or-create · `GET /chat/threads` inbox (peer + last message + unread counts) · `GET /chat/threads/:id/messages?after=<id>` incremental fetch that **bulk-stamps the peer's messages read = "Seen"** · `POST …/messages`. Thread-start + send gate on `requireVerified` (§5); inbox read is plain requireAuth. App polls every 4 s inside a thread, 12 s on the inbox |
+| Marketplace screens + seed data (owner request 2026-11-01) | ✅ LIVE | **Home avatar fix** — header renders `user.avatarUrl` (shared `Avatar` with initials fallback) instead of initials-only; **approved-banner fix** — Home re-syncs the session (`/auth/me` → `updateUser`) on every focus so the §8 KYC banner disappears the moment the server reports `approved` (stale context snapshot was the bug); dev-promo M-Pesa card removed from the hub. **Screens**: rebuilt `HomeScreen` (role-aware hub: stats row, quick actions, live previews), `MaidsScreen` (search + county/job-type chips + verified toggle + pagination), `MaidProfileScreen` (public profile + gated Message), `FindJobsScreen` (feed + applied-state chips), `JobDetailScreen` (dual mode: maid apply/paywall/withdraw · owner applicant list with Accept/Reject), `PostJobScreen`, `MyJobsScreen` (open/close), `ApplicationsScreen` (status + credits + withdraw), `ChatsScreen` + `ChatThreadScreen`; shared `components/market/cards.js`; root-stack routes MaidProfile/JobDetail/PostJob/ChatThread. **Seed**: `sql/seed_demo.js` — 20 maids + 7 employers (full §7 profiles, 16/4 + 5/2 KYC split, last_active 0–46d across all §10 tiers) + 10 jobs + 8 applications + 2 chat threads; marker `@demo.maidora.co.ke`, re-run purges + re-inserts (CASCADE, real accounts untouched); **demo password `Demo#1234`** (owner knowledge) |
 | Admin dashboard (§13 control panel) | 📐 SPEC READY | `docs/Admin_Dashboard_Spec.md` (2026-10-31): RBAC admin_users, KYC review queue (admin-scoped media reader), users/transactions/pricing-editor modules, analytics, reports & disputes, event_log monitoring; 4 build phases (M1 read-spine → M4 trust ops). Not started — build later |
 | SMS Retriever OTP autofill | ⏸️ DEFERRED | Needs EAS dev build; zero-native layers ship today (§5.7) |
 | Push notifications | ⏳ PENDING | |
@@ -153,9 +154,10 @@ unset → RoleSelect (onboarding)` · `onboardingComplete → Login` · else
 | Login / ForgotPassword | `LoginScreen.js`, `ForgotPasswordScreen.js` | ✅ live (login updates location) |
 | Profile + §7 completeness editor | `ProfileScreen.js` | ✅ live (househelp) |
 | M-Pesa payment test | `PaymentScreen.js` | ✅ live (real money — test KES 1) |
-| Home (per role) | `HomeScreen.js` | ✅ hub + M-Pesa entry |
-| My Jobs / Maids / Find Jobs / Applications | respective files | ⏳ placeholders |
-| Chats | `ChatsScreen.js` | ⏳ placeholder |
+| Home (per role) | `HomeScreen.js` | ✅ role-aware marketplace hub (stats, quick actions, live previews, §7/§8 banners — KYC banner auto-clears on approval via focus session-sync; avatar photo w/ initials fallback) |
+| My Jobs / Maids / Find Jobs / Applications | `employer/MyJobsScreen.js`, `employer/MaidsScreen.js`, `maid/FindJobsScreen.js`, `maid/ApplicationsScreen.js` | ✅ LIVE (2026-11-01) — search + chips + pagination; §9 credits card; open/close postings |
+| Chats | `ChatsScreen.js` + `chat/ChatThreadScreen.js` | ✅ LIVE (2026-11-01) — inbox w/ unread counts + 4s-poll conversation with Seen receipts |
+| Maid public profile / Job detail / Post job | `employer/MaidProfileScreen.js`, `maid/JobDetailScreen.js`, `employer/PostJobScreen.js` | ✅ LIVE (2026-11-01) — root-stack routes `MaidProfile` · `JobDetail` (dual: apply/paywall/withdraw vs applicants accept/reject) · `PostJob` |
 | Settings | `SettingsScreen.js` | ✅ live |
 | KYC intro / personal / doc type | `verification/KycIntroScreen.js`, `KycPersonalScreen.js`, `KycDocTypeScreen.js` | ✅ live (draft autosave, DOB picker, gender pills) |
 | KYC photos checklist (front + back + selfie) | `verification/KycCaptureScreen.js` + `GuidedCapture.js` | ✅ live (guided frames, exact crop, WebP upload per item; retake crash fixed, server thumbnails via `useKycImage` data-URI read path, front-camera shots mirrored to match the preview, flip-camera button — 2026-10-31) — full flow trace: `src/kycLog.js` `[KYC]` lines from "Continue verification" through upload/submit |
@@ -222,6 +224,10 @@ src/routes/profile.js   GET/PUT maid profile + derived completeness (§7)
 src/routes/kyc.js       KYC state | draft autosave | legacy image upload | submit | private image stream (§8)
 src/routes/media.js     media pipeline: avatar (public) + KYC docs (private) → media.maidora.co.ke (§5.5)
 src/routes/payments.js  purposes (pricing table) | stk-push (§5 gated) | list | :id status | callback (grants kyc_urgent)
+src/routes/maids.js     GET /maids (search + §10 decay) | GET /maids/:id public profile
+src/routes/jobs.js      POST /jobs | GET /jobs | /mine | :id (+applications) | PATCH | :id/apply (§9)
+src/routes/applications.js  GET /applications (role-aware + creditsLeft) | PATCH :id (accept/reject/withdraw)
+src/routes/chat.js      POST /chat/threads | inbox | :id/messages?after= (read-stamp) | send
 src/services/otp.js     hashed OTPs (phone + email), cooldown/hourly/attempt caps
 src/services/sms.js     TalkSasa API v3 client
 src/services/email.js   nodemailer SMTP (optional email verification, fails soft)
@@ -268,6 +274,18 @@ sql/migrate_v5.js       v5: payment_purposes + media_assets + users.avatar_url (
 | POST `/api/payments/callback` | **public** | Daraja result receiver — ACKs fast |
 | POST `/api/media/avatar` | JWT | profile photo (base64 WebP/JPEG/PNG, ≤5 MB, magic-sniffed) → public `media.maidora.co.ke/avatars/…` URL on `users.avatar_url` + `media_assets` row; replaces (deletes) the previous file |
 | POST `/api/media/kyc/:field` | JWT | KYC doc `id_front\|id_back\|selfie` (same validation) → web-DENIED `kyc/` dir, basename on `users.kyc_*_url`, `media_assets` audit row; same `{ok, field}` contract as the legacy `/kyc/images` (which stays for compatibility) |
+| GET `/api/maids` | JWT (read-only §15.1) | maid search: `q, county, job_type, min_experience, max_salary, verified, page, per_page` → `{maids, total, hasMore, counties}`; §10 decay applied (archived never, dormant only with `q`) |
+| GET `/api/maids/:id` | JWT | public maid profile — NO phone/contact; `lastActiveLabel`, trustBadge, languages, wage, bio |
+| POST `/api/jobs` | JWT + **verified** + employer | `{title, description, jobType, county?, area?, salaryAmount?}` → 201 job |
+| GET `/api/jobs` | JWT (read-only) | open jobs feed (`q, county, job_type, page`) with employer identity + `myApplicationStatus` |
+| GET `/api/jobs/mine` · PATCH `/api/jobs/:id` | JWT + **verified** + owner | employer postings (applicant counts) · edit fields / `status: open\|closed` |
+| GET `/api/jobs/:id` | JWT | detail; the OWNER also receives `applications[]` (maid summaries) for the hiring loop |
+| POST `/api/jobs/:id/apply` | JWT + **verified** + househelp | §9: duplicate → 409; credits exhausted → **402 `paywall_required`**; else 201 `{creditsLeft}` |
+| GET `/api/applications` | JWT | role-aware: maid = own list + `creditsLeft` (2 lifetime); employer = incoming across own jobs |
+| PATCH `/api/applications/:id` | JWT + party | employer `accepted\|rejected` · maid `withdrawn` (credit stays consumed) |
+| POST `/api/chat/threads` | JWT + **verified** | `{peerId}` → `{threadId}` find-or-create (ordered pair) |
+| GET `/api/chat/threads` | JWT | inbox: peer, last message, unread count |
+| GET/POST `/api/chat/threads/:id/messages` | JWT (POST **verified**) | `?after=<id>` incremental fetch stamps the peer's messages read (Seen); POST sends |
 
 ### 5.3 Environment variables (names only — values in server `.env`)
 
@@ -537,13 +555,13 @@ submissions (own-image streaming route exists; media pipeline now stores the
 documents under `media.maidora.co.ke/kyc/` web-denied — the admin reader
 from `docs/Admin_Dashboard_Spec.md` M2 plugs straight in) · blur/glare ML
 detection + real liveness/face-
-match deferred to the EAS dev build (zero-native layers ship today) · jobs
-listings CRUD + Find Jobs feed · applications + §9 welcome bonus (2
-lifetime) + paywall (tiers DECIDED via MPS Amendment v3.2 — PAYG KSh 50 /
-Basic KSh 99 / Gold KSh 199 + boosts; only multi-device session policy
-§15.6 still open) · search/matching with location + §10 decay ranking ·
-real chat backend · §13 suggestion cards (day-based, dismissible) · push
-notifications.
+match deferred to the EAS dev build (zero-native layers ship today) ·
+**marketplace NEXT:** application top-up payment (the §9 paywall sheet is
+live — flip the `application` row active in `payment_purposes` and wire the
+sheet to stk-push) · job-edit UI (PATCH /jobs/:id is live; MyJobs covers
+open/close) · reviews/ratings · §13 suggestion cards (day-based,
+dismissible) · push notifications for applications/messages (chat polls
+today).
 
 **Admin dashboard (§13):** spec approved 2026-10-31 —
 `docs/Admin_Dashboard_Spec.md`. Build later, M1 read-spine first (admin

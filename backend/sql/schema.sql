@@ -194,3 +194,66 @@ CREATE TABLE IF NOT EXISTS payment_purposes (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Payment purpose + pricing catalog — edit here, no app release needed';
+
+-- ─── Jobs — employer listings (v8 marketplace, unified spec §9) ─────────────
+CREATE TABLE IF NOT EXISTS jobs (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  employer_id CHAR(36) NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  description VARCHAR(2000) NOT NULL,
+  job_type ENUM('live_in','live_out','day_burg') NOT NULL,
+  county VARCHAR(120) NULL,
+  area VARCHAR(120) NULL,
+  salary_amount INT UNSIGNED NULL COMMENT 'KES per month, optional',
+  status ENUM('open','closed') NOT NULL DEFAULT 'open',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_jobs_employer (employer_id),
+  INDEX idx_jobs_status_created (status, created_at),
+  INDEX idx_jobs_county (county),
+  CONSTRAINT fk_jobs_employer FOREIGN KEY (employer_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Job applications — §9: 2 lifetime free (withdrawn/rejected still
+-- consume), then paywall. The consumed count is COUNT(*) per maid.
+CREATE TABLE IF NOT EXISTS job_applications (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  job_id BIGINT UNSIGNED NOT NULL,
+  maid_id CHAR(36) NOT NULL,
+  message VARCHAR(500) NULL,
+  status ENUM('pending','accepted','rejected','withdrawn') NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_job_maid (job_id, maid_id),
+  INDEX idx_app_maid (maid_id, status),
+  CONSTRAINT fk_app_job FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_app_maid FOREIGN KEY (maid_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Chat threads — one per employer↔househelp pair, pair stored ORDERED ────
+CREATE TABLE IF NOT EXISTS chat_threads (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_a_id CHAR(36) NOT NULL COMMENT 'lexically smaller uuid of the pair',
+  user_b_id CHAR(36) NOT NULL,
+  last_message_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_thread_pair (user_a_id, user_b_id),
+  INDEX idx_thread_a (user_a_id),
+  INDEX idx_thread_b (user_b_id),
+  CONSTRAINT fk_thread_a FOREIGN KEY (user_a_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_thread_b FOREIGN KEY (user_b_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Chat messages — polling-based (?after=<id>), read_at bulk-stamped ──────
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  thread_id BIGINT UNSIGNED NOT NULL,
+  sender_id CHAR(36) NOT NULL,
+  body VARCHAR(2000) NOT NULL,
+  read_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_msg_thread (thread_id, id),
+  INDEX idx_msg_unread (thread_id, sender_id, read_at),
+  CONSTRAINT fk_msg_thread FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE,
+  CONSTRAINT fk_msg_sender FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

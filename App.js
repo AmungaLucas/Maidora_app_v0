@@ -32,6 +32,10 @@ import LoginScreen from './src/screens/auth/LoginScreen';
 import ForgotPasswordScreen from './src/screens/auth/ForgotPasswordScreen';
 import SettingsScreen from './src/screens/settings/SettingsScreen';
 import PaymentScreen from './src/screens/payments/PaymentScreen';
+import MaidProfileScreen from './src/screens/employer/MaidProfileScreen';
+import PostJobScreen from './src/screens/employer/PostJobScreen';
+import JobDetailScreen from './src/screens/maid/JobDetailScreen';
+import ChatThreadScreen from './src/screens/chat/ChatThreadScreen';
 import KycIntroScreen from './src/screens/verification/KycIntroScreen';
 import KycPersonalScreen from './src/screens/verification/KycPersonalScreen';
 import KycDocTypeScreen from './src/screens/verification/KycDocTypeScreen';
@@ -188,6 +192,12 @@ function RootNavigator({ navigationRef }) {
       <Stack.Screen name="HousehelpTabs" component={HousehelpTabs} options={{ headerShown: false }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
       <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'Payment' }} />
+      {/* Marketplace (unified spec §9/§10) — shared by both roles; the root
+          stack's automatic back button returns to the originating tab. */}
+      <Stack.Screen name="MaidProfile" component={MaidProfileScreen} options={{ title: 'Profile' }} />
+      <Stack.Screen name="JobDetail" component={JobDetailScreen} options={{ title: 'Job' }} />
+      <Stack.Screen name="PostJob" component={PostJobScreen} options={{ title: 'Post a Job' }} />
+      <Stack.Screen name="ChatThread" component={ChatThreadScreen} options={{ title: 'Chat' }} />
       {/* KYC / trust badge (§8) — root-stack copies also open from the Home
           banner; inside the Profile drawer the same screens render under the
           drawer's own hamburger header (ProfileDrawer). */}

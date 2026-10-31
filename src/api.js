@@ -190,4 +190,50 @@ export const api = {
   // after a restart). Gets [KYC] round-trip logging like every other call.
   kycImageFetch: (field, token) =>
     request(`/kyc/images/${field}?format=base64`, { token, timeoutMs: 30000 }),
+
+  // ─── Marketplace (unified spec §9/§10/§15.1) ────────────────────────────
+  // GET /maids — search + filters (§10 decay applied server-side).
+  maids: (params, token) => request(`/maids${qs(params)}`, { token }),
+  // GET /maids/:id — public profile (no contact details).
+  maidProfile: (id, token) => request(`/maids/${id}`, { token }),
+
+  // POST /jobs — employer posts a job (verified gate).
+  postJob: (payload, token) => request('/jobs', { method: 'POST', body: payload, token }),
+  // GET /jobs — open jobs feed (q, county, job_type, page).
+  jobs: (params, token) => request(`/jobs${qs(params)}`, { token }),
+  // GET /jobs/mine — the employer's own postings.
+  myJobs: (token) => request('/jobs/mine', { token }),
+  // GET /jobs/:id — detail (+ applications when the caller owns the job).
+  jobDetail: (id, token) => request(`/jobs/${id}`, { token }),
+  // PATCH /jobs/:id — edit fields / open|close.
+  updateJob: (id, payload, token) =>
+    request(`/jobs/${id}`, { method: 'PATCH', body: payload, token }),
+  // POST /jobs/:id/apply — §9: 2 lifetime free, then 402 paywall_required.
+  applyToJob: (id, message, token) =>
+    request(`/jobs/${id}/apply`, { method: 'POST', body: { message }, token }),
+  // GET /applications — role-aware list (+ creditsLeft for househelp).
+  applications: (token) => request('/applications', { token }),
+  // PATCH /applications/:id — employer accept|reject · maid withdraw.
+  updateApplication: (id, status, token) =>
+    request(`/applications/${id}`, { method: 'PATCH', body: { status }, token }),
+
+  // POST /chat/threads — {peerId} → {threadId} (find-or-create, verified gate).
+  chatStart: (peerId, token) =>
+    request('/chat/threads', { method: 'POST', body: { peerId }, token }),
+  // GET /chat/threads — inbox with unread counts.
+  chatThreads: (token) => request('/chat/threads', { token }),
+  // GET /chat/threads/:id/messages?after= — incremental fetch (marks seen).
+  chatMessages: (threadId, after, token) =>
+    request(`/chat/threads/${threadId}/messages${after ? `?after=${after}` : ''}`, { token }),
+  // POST /chat/threads/:id/messages — {body}.
+  chatSend: (threadId, body, token) =>
+    request(`/chat/threads/${threadId}/messages`, { method: 'POST', body: { body }, token }),
 };
+
+// Minimal query-string builder — skips null/undefined/'' values.
+function qs(params = {}) {
+  const pairs = Object.entries(params)
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+  return pairs.length ? `?${pairs.join('&')}` : '';
+}

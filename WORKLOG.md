@@ -6,6 +6,66 @@
 
 ---
 
+## 2026-11-01 — MARKETPLACE SHIP: search + jobs + applications (§9) + real chat · seed data · home avatar + approved-banner fixes (owner request)
+
+Owner: "fix homescreen avatar · once verification is approved we don't need the
+banner · generate seed data of 20 maids and 7 employers · build homescreens for
+both, jobs, maids with search and filter, chat, maid profile — all per the docs."
+
+**Home fixes (owner-reported).** (1) The header avatar always showed initials
+even with a photo uploaded — it now renders `user.avatarUrl` (shared `Avatar`
+in `components/market/cards.js`: photo with initials fallback + onError). (2)
+The verification banner survived approval because the context snapshot went
+stale — Home now re-syncs the session (`GET /auth/me` → `updateUser`) on every
+focus, so the banner disappears the moment the server says `approved`; avatar
+URLs stay fresh the same way. The dev-promo "Try an M-Pesa payment" card left
+the hub (payments live in the drawer, purpose picker intact).
+
+**Backend v8 (deployed, probes green).** `sql/migrate_v8_marketplace.js` (idempotent
+CREATEs, schema.sql synced): `jobs`, `job_applications` (UNIQUE job+maid),
+`chat_threads` (ordered-pair UNIQUE), `chat_messages` (read_at bulk-stamp).
+Routes: `maids.js` (browse/search: q, county, job_type, verified, min
+experience, salary cap + §10 decay — 60d+ archived never listed, 30–59d dormant
+only when searching, 14–29d quiet ranked below active; counties meta from real
+rows; public profile `:id` without contact details), `jobs.js` (post/browse/
+mine/detail-with-applications/patch/apply), `applications.js` (role-aware
+lists; §9: every application ever consumes a credit → 2 lifetime free, then
+402 `paywall_required`; withdraw keeps the credit consumed per spec; employer
+accept/reject), `chat.js` (`/threads` find-or-create, inbox with unread
+counts, `?after=<id>` incremental fetch that stamps read_at = "seen on open",
+4s-poll friendly; no websockets on cPanel — polling by design). All mounted in
+app.js; service routes gate with `requireVerified` (§5), browse is read-only
+requireAuth (§15.1 adopted scope). Split lesson: applications handlers needed
+their OWN router — two `GET /` on one router shadow silently.
+
+**Seed (owner-specified shape).** `sql/seed_demo.js` — 20 maids + 7 employers
+with full §7 profiles (languages, job types, wages 9k–22k, bios, next of kin),
+Kenya-wide locations, kyc approved×16/submitted×4 (maids) and 5/2 (employers),
+last_active spread 0–46 days to exercise all §10 tiers; +10 open jobs, 8
+applications (every status), 2 chat threads with messages. Marker
+`@demo.maidora.co.ke`, re-run = purge + re-insert (children CASCADE; real
+accounts untouched). Demo login: any seeded phone/email + `Demo#1234` (owner
+knowledge; documented here + §5.4). E2E on live: login ✓, /maids default 17
+(dormant hidden) + q finds 20 ✓, county+verified filter ✓, jobs ✓, apply
+consumes 1→0 + duplicate 409 + 3rd → 402 paywall ✓, withdraw keeps credit
+consumed ✓, employer accept ✓, chat find-or-create + incremental fetch ✓.
+
+**App screens (13 files).** Shared `components/market/cards.js` (Avatar,
+TrustBadge, MaidCard, JobCard, ChipRow, StatusChip, formatKes, timeAgo).
+`HomeScreen` rebuilt per role (stats row, quick actions, live previews);
+`MaidsScreen` (search + county chips from meta + job-type chips + verified
+toggle + pagination); `MaidProfileScreen` (public profile + gated Message →
+thread); `FindJobsScreen` (feed + applied-state chips); `JobDetailScreen`
+(maid: apply/paywall-sheet/withdraw; owner: applicant list with Accept/Reject
++ Message); `PostJobScreen` (create); `MyJobsScreen` (postings + open/close);
+`ApplicationsScreen` (status chips + credits card + withdraw);
+`ChatsScreen` (inbox, 12s quiet refresh) + `ChatThreadScreen` (history +
+4s incremental poll, Seen receipts, composer). New root-stack routes:
+MaidProfile · JobDetail · PostJob · ChatThread (back button free from the
+navigator). api.js grew the client methods. @babel parse 13/13.
+
+---
+
 ## 2026-11-01 — M-Pesa "fetch failed" root-caused + fixed: cause surfacing + one connect-retry (deployed, E2E 7/7)
 
 Owner's field logs (same session that confirmed resetRoot): KYC submitted clean,

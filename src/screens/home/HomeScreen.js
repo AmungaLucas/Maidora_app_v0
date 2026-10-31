@@ -1,17 +1,27 @@
-// Home tab — shared by both roles, content adapts to user.role.
-// Banner order per spec §7 → §8: PROFILE COMPLETENESS first, verification
-// (Trust Badge) second — both roles. Completeness comes from the SHARED
-// AppContext snapshot — the Profile wizard updates it on every save, so the
-// banner reacts instantly; a focus refetch re-syncs with the server.
-// Header: settings icon REMOVED (owner) — settings live in the Profile
-// drawer. The right slot is now the user's avatar, tapping to Profile.
-import React, { useMemo } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+// Home tab — role-aware marketplace hub (both roles share the file).
+//
+// Owner fixes 2026-11-01:
+//   • Avatar — the header now renders the user's actual photo (users.avatar_url
+//     via publicUser) with the initials fallback; previously initials only.
+//   • Verification banner — the context snapshot used to go stale after the
+//     owner approved KYC server-side, so "Verification in review" stuck on
+//     Home forever. Home now re-syncs the session (/auth/me) on every focus;
+//     the moment kycStatus becomes 'approved' the banner is gone (and the
+//     Trust Badge shows up in listings everywhere).
+//
+// Content per role (unified spec): profile-completeness banner (§7) first,
+// KYC banner (§8, hidden once approved), then live marketplace content —
+// employer: quick actions + open jobs + new maids; househelp: find-jobs CTA +
+// application credits (§9) + latest jobs.
+import React, { useCallback, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useApp } from '../../context/AppContext';
+import { api } from '../../api';
 import { ROLES, colors, radius } from '../../theme';
 import { Screen } from '../../ui';
+import { Avatar, JobCard, MaidCard, SectionTitle, formatKes } from '../../components/market/cards';
 import { REASON_LABELS } from '../verification/kycShared';
 
 function firstName(fullName) {
@@ -47,95 +57,189 @@ function kycBannerBody(user) {
 }
 
 export default function HomeScreen({ navigation }) {
-  const { user, token, profileCompleteness: completeness, refreshCompleteness } = useApp();
-  const isEmployer = user?.role !== 'househelp';
+  const { user, token, profileCompleteness: completeness, refreshCompleteness, updateUser } = useApp();
+  const isEmployer = user?.role === 'employer';
 
-  // Re-sync completeness every time Home regains focus (covers changes made
-  // in the Profile wizard via the shared context, plus cross-device edits).
+  // Live hub data (previews + counters) — silent on failure.
+  const [hub, setHub] = useState({ jobs: [], maids: [], openJobs: 0, applicants: 0, creditsLeft: null, unread: 0 });
+
   useFocusEffect(
-    React.useCallback(() => {
-      if (token && user?.role) refreshCompleteness();
-    }, [token, user?.role, refreshCompleteness])
-  );
-
-  const initials = useMemo(
-    () =>
-      String(user?.fullName || 'M')
-        .trim()
-        .split(/\s+/)
-        .slice(0, 2)
-        .map((w) => w[0])
-        .join('')
-        .toUpperCase(),
-    [user?.fullName]
+    useCallback(() => {
+      if (!token || !user?.role) return;
+      refreshCompleteness();
+      let cancelled = false;
+      (async () => {
+        // 1. Re-sync the session so kycStatus / avatarUrl are never stale —
+        //    this is what retires the verification banner the moment the
+        //    submission is approved (owner request 2026-11-01).
+        try {
+          const me = await api.me(token);
+          if (!cancelled && me?.user) await updateUser(me.user, me.token);
+        } catch {
+          // offline / transient — keep the cached snapshot
+        }
+        // 2. Hub content per role.
+        try {
+          if (isEmployer) {
+            const [jobsRes, maidsRes] = await Promise.all([
+              api.myJobs(token).catch(() => null),
+              api.maids({ per_page: 3 }, token).catch(() => null),
+            ]);
+            if (cancelled) return;
+            const jobs = jobsRes?.jobs || [];
+            setHub((h) => ({
+              ...h,
+              jobs: jobs.slice(0, 2),
+              openJobs: jobs.filter((j) => j.status === 'open').length,
+              applicants: jobs.reduce((n, j) => n + (j.applicantCount || 0), 0),
+              maids: maidsRes?.maids || [],
+            }));
+          } else {
+            const [jobsRes, appsRes] = await Promise.all([
+              api.jobs({ per_page: 2 }, token).catch(() => null),
+              api.applications(token).catch(() => null),
+            ]);
+            if (cancelled) return;
+            setHub((h) => ({
+              ...h,
+              jobs: jobsRes?.jobs || [],
+              totalJobs: jobsRes?.total || 0,
+              creditsLeft: appsRes?.creditsLeft ?? null,
+            }));
+          }
+        } catch {
+          // previews are best-effort
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [token, user?.role, isEmployer, refreshCompleteness, updateUser])
   );
 
   const showCompletenessBanner =
     completeness && (completeness.done < completeness.total || completeness.total === 0);
+  const kycApproved = user?.kycStatus === 'approved';
 
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Image source={require('../../../assets/splash-icon.png')} style={styles.logo} />
         <View style={{ flex: 1 }}>
           <Text style={styles.greeting}>Karibu, {firstName(user?.fullName)} 👋</Text>
-          <Text style={styles.roleLine}>{ROLES[user?.role] || 'Member'} · Maidora Kenya</Text>
+          <Text style={styles.roleLine}>
+            {isEmployer
+              ? `${ROLES.employer} · ${hub.openJobs ? `${hub.openJobs} open job${hub.openJobs === 1 ? '' : 's'}` : 'Maidora Kenya'}`
+              : `${ROLES.househelp} · Maidora Kenya`}
+          </Text>
         </View>
-        {/* User avatar → Profile (settings icon moved into the Profile drawer) */}
-        <Pressable
-          onPress={() => navigation.navigate('ProfileTab')}
-          hitSlop={8}
-          accessibilityLabel="Open my profile"
-        >
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
+        {/* Real avatar photo → Profile (initials fallback when none uploaded).
+            Owner fix 2026-11-01 — the header used to show initials only. */}
+        <Pressable onPress={() => navigation.navigate('ProfileTab')} hitSlop={8} accessibilityLabel="Open my profile">
+          <Avatar url={user?.avatarUrl} name={user?.fullName} size={44} />
+        </Pressable>
+      </View>
+
+      {/* ── Employer hub ─────────────────────────────────────────────────── */}
+      {isEmployer ? (
+        <>
+          <View style={styles.hero}>
+            <Text style={styles.heroTitle}>Your home deserves trusted hands.</Text>
+            <Text style={styles.heroBody}>
+              Browse verified house helps near you and hire with confidence — or post a job and let
+              them come to you.
+            </Text>
+            <View style={styles.heroActions}>
+              <Pressable style={styles.cta} onPress={() => navigation.navigate('MaidsTab')}>
+                <Text style={styles.ctaText}>Browse Maids</Text>
+                <Ionicons name="arrow-forward" size={15} color={colors.cream} />
+              </Pressable>
+              <Pressable style={styles.ctaGhost} onPress={() => navigation.navigate('PostJob')}>
+                <Ionicons name="add-circle-outline" size={17} color={colors.cream} />
+                <Text style={styles.ctaGhostText}>Post a Job</Text>
+              </Pressable>
+            </View>
           </View>
-        </Pressable>
-      </View>
 
-      <View style={styles.hero}>
-        <View style={styles.eyebrowRow}>
-          <View style={styles.liveDot} />
-          <Text style={styles.eyebrow}>
-            {isEmployer ? 'Hiring trusted help' : 'Getting discovered'}
-          </Text>
-        </View>
-        <Text style={styles.heroTitle}>
-          {isEmployer ? 'Your home deserves trusted hands.' : 'Let families find you.'}
-        </Text>
-        <Text style={styles.heroBody}>
-          {isEmployer
-            ? 'Browse verified house helps near you, check reviews from other households and hire with confidence.'
-            : 'Complete your profile with your skills and experience so nearby households can find and hire you.'}
-        </Text>
-        <Pressable
-          style={styles.cta}
-          onPress={() =>
-            navigation.navigate(isEmployer ? 'MaidsTab' : 'FindJobsTab')
-          }
-        >
-          <Text style={styles.ctaText}>
-            {isEmployer ? 'Browse Maids' : 'Find Jobs'}
-          </Text>
-          <Ionicons name="arrow-forward" size={16} color={colors.cream} />
-        </Pressable>
-      </View>
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statNum}>{hub.openJobs}</Text>
+              <Text style={styles.statLabel}>Open jobs</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.stat}>
+              <Text style={styles.statNum}>{hub.applicants}</Text>
+              <Text style={styles.statLabel}>Applicants</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.stat}>
+              <Text style={[styles.statNum, kycApproved && { color: colors.goldDark }]}>{kycApproved ? '✓' : '—'}</Text>
+              <Text style={styles.statLabel}>Trust Badge</Text>
+            </View>
+          </View>
 
-      <View style={styles.tipCard}>
-        <Ionicons name="heart" size={18} color={colors.gold} />
-        <Text style={styles.tipText}>
-          {isEmployer
-            ? 'Posting a job soon? Add clear duties and working days — it attracts better matches.'
-            : 'Keep your phone verified and location up to date — families search near you first.'}
-        </Text>
-      </View>
+          {hub.jobs.length ? (
+            <>
+              <SectionTitle title="Your postings" actionLabel="My Jobs" onAction={() => navigation.navigate('MyJobsTab')} />
+              {hub.jobs.map((j) => (
+                <JobCard key={j.id} job={j} onPress={() => navigation.navigate('JobDetail', { jobId: j.id })} />
+              ))}
+            </>
+          ) : null}
+
+          {hub.maids.length ? (
+            <>
+              <SectionTitle title="Maids near you" actionLabel="See all" onAction={() => navigation.navigate('MaidsTab')} />
+              {hub.maids.map((m) => (
+                <MaidCard key={m.id} maid={m} onPress={() => navigation.navigate('MaidProfile', { maidId: m.id })} />
+              ))}
+            </>
+          ) : null}
+        </>
+      ) : (
+        /* ── Househelp hub ──────────────────────────────────────────────── */
+        <>
+          <View style={styles.hero}>
+            <Text style={styles.heroTitle}>Let families find you.</Text>
+            <Text style={styles.heroBody}>
+              Jobs are posted by households across Kenya every week. Keep your profile complete and
+              apply early — your first two applications are free.
+            </Text>
+            <Pressable style={styles.cta} onPress={() => navigation.navigate('FindJobsTab')}>
+              <Text style={styles.ctaText}>Find Jobs</Text>
+              <Ionicons name="arrow-forward" size={15} color={colors.cream} />
+            </Pressable>
+          </View>
+
+          {hub.creditsLeft !== null ? (
+            <View style={styles.creditsCard}>
+              <View style={styles.creditsNumWrap}>
+                <Text style={styles.creditsNum}>{hub.creditsLeft}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.creditsTitle}>Free applications left</Text>
+                <Text style={styles.creditsBody}>
+                  {hub.creditsLeft > 0
+                    ? 'Apply with one tap — no payment needed until these run out.'
+                    : 'Used up — a top-up via M-Pesa is on the way. Browsing stays free.'}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          {hub.jobs.length ? (
+            <>
+              <SectionTitle title="Latest jobs" actionLabel="See all" onAction={() => navigation.navigate('FindJobsTab')} />
+              {hub.jobs.map((j) => (
+                <JobCard key={j.id} job={j} onPress={() => navigation.navigate('JobDetail', { jobId: j.id })} />
+              ))}
+            </>
+          ) : null}
+        </>
+      )}
 
       {/* §7 — PROFILE COMPLETENESS banner FIRST (both roles, spec §7 → §8 order) */}
       {showCompletenessBanner ? (
-        <Pressable
-          style={styles.completenessCard}
-          onPress={() => navigation.navigate('ProfileTab')}
-        >
+        <Pressable style={styles.completenessCard} onPress={() => navigation.navigate('ProfileTab')}>
           <View style={styles.completenessIconWrap}>
             <Ionicons name="sparkles-outline" size={20} color={colors.brand} />
           </View>
@@ -151,8 +255,10 @@ export default function HomeScreen({ navigation }) {
         </Pressable>
       ) : null}
 
-      {/* §8 — non-blocking KYC banner (BOTH roles, until approved) */}
-      {user?.kycStatus !== 'approved' ? (
+      {/* §8 — non-blocking KYC banner (BOTH roles) — GONE once approved.
+          The focus re-sync above keeps kycStatus fresh, so approval from the
+          review side clears this on the very next visit to Home. */}
+      {!kycApproved ? (
         <Pressable style={styles.kycCard} onPress={() => navigation.navigate('KycIntro')}>
           <View style={styles.kycIconWrap}>
             <Ionicons
@@ -175,23 +281,11 @@ export default function HomeScreen({ navigation }) {
         </Pressable>
       ) : null}
 
-      <Pressable style={styles.mpesaCard} onPress={() => navigation.navigate('Payment')}>
-        <View style={styles.mpesaIconWrap}>
-          <Ionicons name="phone-portrait-outline" size={20} color={colors.goldDark} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.mpesaTitle}>Try an M-Pesa payment</Text>
-          <Text style={styles.mpesaBody}>
-            Live STK Push is wired up. Send a KES 1 test payment to see the full flow.
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-      </Pressable>
-
       <View style={{ flex: 1 }} />
       <Text style={styles.footnote}>
-        Marketplace features (listings, chat, hiring) are rolling out next. Your account role is
-        permanent — change requests live in Profile → Account settings.
+        {isEmployer
+          ? 'House helps never see your phone number until you message them. Report anything suspicious from a profile.'
+          : 'Employers only see your first activity status — never your phone number until you message them.'}
       </Text>
     </Screen>
   );
@@ -204,18 +298,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
   },
-  logo: { width: 46, height: 43, borderRadius: 10 },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: colors.brandSoftBg,
-    borderWidth: 2,
-    borderColor: colors.gold,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { fontSize: 15, fontWeight: '800', color: colors.brand },
   greeting: { fontSize: 19, fontWeight: '800', color: colors.ink },
   roleLine: { marginTop: 2, fontSize: 13, color: colors.muted },
   hero: {
@@ -223,42 +305,68 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: colors.brand,
   },
-  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.brandSoft },
-  eyebrow: {
-    color: colors.cream,
-    fontSize: 11.5,
-    fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    opacity: 0.9,
-  },
   heroTitle: { color: colors.white, fontSize: 22, fontWeight: '800', lineHeight: 29 },
   heroBody: { color: colors.white, marginTop: 8, fontSize: 14.5, lineHeight: 21, opacity: 0.92 },
+  heroActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
   cta: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 16,
     backgroundColor: colors.gold,
     borderRadius: radius.pill,
     paddingHorizontal: 18,
     paddingVertical: 11,
   },
   ctaText: { color: colors.brandDark, fontWeight: '800', fontSize: 14.5 },
-  tipCard: {
+  ctaGhost: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginTop: 14,
+    alignItems: 'center',
+    gap: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: 'rgba(247, 243, 233, 0.55)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  ctaGhostText: { color: colors.cream, fontWeight: '800', fontSize: 14.5 },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.line,
+    paddingVertical: 14,
+    marginTop: 14,
+  },
+  stat: { flex: 1, alignItems: 'center', gap: 2 },
+  statNum: { fontSize: 20, fontWeight: '800', color: colors.ink },
+  statLabel: { fontSize: 11.5, fontWeight: '700', color: colors.muted },
+  statDivider: { width: 1, height: 30, backgroundColor: colors.line },
+  creditsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 14,
+    backgroundColor: colors.goldSoft,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.gold,
     padding: 14,
   },
-  tipText: { flex: 1, fontSize: 13.5, lineHeight: 20, color: colors.muted },
+  creditsNumWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.gold,
+  },
+  creditsNum: { fontSize: 18, fontWeight: '800', color: colors.goldDark },
+  creditsTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink },
+  creditsBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
   completenessCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -282,28 +390,6 @@ const styles = StyleSheet.create({
   },
   completenessTitle: { fontSize: 14.5, fontWeight: '800', color: colors.ink },
   completenessBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
-  mpesaCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 14,
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.gold,
-    borderLeftWidth: 4,
-    padding: 14,
-  },
-  mpesaIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: colors.cream,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mpesaTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
-  mpesaBody: { marginTop: 2, fontSize: 12.5, lineHeight: 18, color: colors.muted },
   kycCard: {
     flexDirection: 'row',
     alignItems: 'center',
