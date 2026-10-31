@@ -6,6 +6,52 @@
 
 ---
 
+## 2026-10-31 — `users.uuid`: public v4 identifier set AT SIGNUP (owner request)
+
+Owner: "for user id we need to setup uuid at signup." Shipped as an ADDITIVE
+`users.uuid CHAR(36)` (UNIQUE `uk_users_uuid`) — **not** a PK-type switch: the
+BIGINT `id` stays PRIMARY KEY, JWT `uid` claim, and every FK
+(phone_otps · email_otps · maid_profiles · employer_profiles · payments ·
+media_assets) keeps working; converting a live PK to CHAR(36) would rewrite
+six FK tables for zero functional gain. Consumers use `uuid` as the public
+identifier; `id` remains in `publicUser` for client compatibility (the app
+never reads `user.id`, so this is purely additive client-side).
+
+- **migrate_v6** (`backend/sql/migrate_v6.js`, idempotent): adds the column
+  (nullable), backfills every row with a Node `crypto.randomUUID()` (v4 —
+  NOT MySQL `UUID()`, which is v1/MAC-based), adds the UNIQUE index.
+  Deliberately leaves the column NULLABLE on the live DB: the old node
+  process serves until `tmp/restart.txt` flips it and its INSERTs don't know
+  the column — NOT NULL in the same pass would 500 every registration in the
+  upload→restart window. The deploy runs the migration BEFORE and AGAIN AFTER
+  the restart; pass 2 backfills any window stragglers. `schema.sql` keeps
+  `uuid CHAR(36) NOT NULL UNIQUE` for fresh installs.
+- **auth.js**: `/register` generates `crypto.randomUUID()` per signup and
+  INSERTs it; the response now carries `uuid` alongside the existing
+  `userId` (the OTP handoff still uses the internal id — OtpScreen depends
+  on it). `publicUser` exposes `uuid: u.uuid || null`, so verify-otp · login
+  · onboarding · /me · email flows all return it.
+- **Deploy `scripts/deploy_uuid_v6.py`** (backup → upload → migrate pass 1 →
+  restart → migrate pass 2 → health → LIVE register probe → cleanup): probe
+  registered `+254711346747`, got 201 with `uuid
+  59776d63-b58c-4564-90b3-37648f9ec69e`, DB row matched, DELETE cascade
+  cleaned the probe (leftover 0). Health + db-health green. **UUID DEPLOY
+  PASSED.** First run flagged a probe-regex typo (variant group `{4}` →
+  `{3}`) — probe bug, not a server bug; fixed and re-run clean.
+- **⚠ DATA-STATE FINDING (independent of this change, reported to owner)**:
+  `maidorac_db` was emptied BEFORE this deploy — users 0 rows (AUTO_INCREMENT
+  34 → 33 rows deleted, counter preserved), payments 0 (AI 67), phone_otps 0
+  (AI 70), media_assets 0, profiles 0, login_attempts exactly ONE row: a
+  FAILED login for `amungalucas@gmail.com` at 2026-10-31 13:46 (+102.203.137.244)
+  seven minutes before my 13:53 deploy. All project cleanup scripts delete by
+  exact email/phone/id (grepped) — nothing bulk-deletes. No `.sql` dumps
+  exist under /home/maidorac. Consequence: cached app sessions keep working
+  until the next 401; fresh logins will fail until accounts are re-created.
+  Owner decision pending: restore from a cPanel/JetBackup point (if any) or
+  re-signup fresh (uuid now live for every new account).
+
+---
+
 ## 2026-10-31 — Logout navigation hardening + `[AUTH]` event trail · hamburger ghost style (owner field feedback)
 
 Owner round-trip on the `72f4620`/`5a2b60b` build (browsing the drawer

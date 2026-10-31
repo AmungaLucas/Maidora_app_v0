@@ -17,6 +17,7 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 |---|---|---|
 | cPanel hosting + Node 24 gateway | ✅ LIVE | LiteSpeed Node selector, restart via `tmp/restart.txt` |
 | MySQL schema v2 (users + maid_profiles, login_attempts, email_otps, phone_otps, payments) | ✅ LIVE | `sql/schema.sql` + `sql/migrate_v2.js`, both idempotent |
+| `users.uuid` — public v4 identifier AT SIGNUP (owner request 2026-10-31) | ✅ LIVE | ADDITIVE `uuid CHAR(36)` + UNIQUE `uk_users_uuid` (migrate_v6, run pre- AND post-restart; backfills existing rows with Node `crypto.randomUUID()` v4 — column stays nullable on live so the old process's INSERTs survive the deploy window; `schema.sql` declares NOT NULL for fresh installs). `/register` mints the uuid; response carries `uuid` beside `userId` (OTP handoff unchanged); `publicUser` returns it on every auth flow. BIGINT `id` untouched (PK, JWT `uid`, all six FK tables). Live probe: 201 + v4 uuid + DB match + cascade cleanup. **⚠ App-side note**: the DB was emptied before this deploy (see WORKLOG 2026-10-31) — every NEW signup gets a uuid; existing rows were gone before backfill |
 | Auth: signup → SMS OTP (TalkSasa) → JWT | ✅ LIVE | Role NOT at signup — chosen at onboarding (spec §3.2) |
 | Onboarding: role selection post-verification | ✅ LIVE | `POST /api/auth/onboarding`, immutable once set |
 | Status model v2 (account_status + *_verified_at + kyc_*) | ✅ LIVE | Spec §4.2 split model; single `status` column dropped |

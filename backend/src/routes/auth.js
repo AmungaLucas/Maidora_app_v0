@@ -10,6 +10,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const config = require('../config');
 const { pool } = require('../config/db');
 const { sendSms } = require('../services/sms');
@@ -44,6 +45,10 @@ function signToken(user) {
 function publicUser(u) {
   return {
     id: u.id,
+    // Public identifier (v4 UUID, set at signup — migrate_v6). Non-enumerable
+    // and safe to expose/serialize; the BIGINT id stays internal (JWT uid,
+    // FK joins) and is kept here only for client compatibility.
+    uuid: u.uuid || null,
     fullName: u.full_name,
     email: u.email,
     phone: u.phone,
@@ -149,13 +154,17 @@ router.post('/register', async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(values.password, 10);
+    // users.uuid — public v4 identifier, generated AT SIGNUP (owner request
+    // 2026-10-31). Node randomUUID (v4), not MySQL UUID() (v1, MAC-based).
+    const userUuid = crypto.randomUUID();
     const [ins] = await pool.query(
       `INSERT INTO users
-         (full_name, email, phone, role, password_hash,
+         (uuid, full_name, email, phone, role, password_hash,
           location_name, location_area, location_county, location_source,
           latitude, longitude, referred_by_code, account_status)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_verification')`,
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_verification')`,
       [
+        userUuid,
         values.fullName, values.email, values.phone, passwordHash,
         values.locationName, values.locationArea, values.locationCounty, values.locationSource,
         values.lat, values.lng, values.referralCode,
@@ -178,7 +187,8 @@ router.post('/register', async (req, res, next) => {
 
     return res.status(201).json({
       message: 'Account created. We sent a 6-digit code to your phone.',
-      userId: ins.insertId,
+      userId: ins.insertId, // internal id — the OTP handoff uses it
+      uuid: userUuid, // public identifier (users.uuid)
       phone: values.phone,
       maskedPhone: maskPhone(values.phone),
       role: null, // chosen at onboarding, after verification

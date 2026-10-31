@@ -7,6 +7,12 @@
 -- ─── Users — identity + split status model (§4.1/§4.2) ─────────────────────
 CREATE TABLE IF NOT EXISTS users (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  -- Public user identifier — v4 UUID generated at signup (migrate_v6, owner
+  -- request 2026-10-31). Non-enumerable, safe to expose; the BIGINT id stays
+  -- internal (JWT uid + FK joins). Fresh installs get NOT NULL: the register
+  -- route always supplies it. (The live-DB migration keeps it nullable until
+  -- the old node process is recycled — see migrate_v6.js.)
+  uuid CHAR(36) NOT NULL UNIQUE,
   full_name VARCHAR(120) NOT NULL,
   email VARCHAR(190) NOT NULL UNIQUE,
   phone VARCHAR(16) NOT NULL UNIQUE,
