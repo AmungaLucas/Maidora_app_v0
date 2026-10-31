@@ -71,12 +71,14 @@ const RECEIPT_EXTRA_POLLS = 8; // keep polling ~30s after success until the rece
 const ADOPT_WINDOW_MS = 3 * 60 * 1000; // adopt a pending row created within 3 min
 const RESUME_WINDOW_MS = 10 * 60 * 1000; // offer to resume a pending row up to 10 min old
 
-// Payment purposes (§9 product slots — backend PURPOSE_STK map has the STK
-// labels). `amount: null` = user picks from AMOUNTS; a number = fixed price
-// and the amount chips hide. PRICES ARE PROVISIONAL for boost/plans until
-// the products ship (§10) — only kyc_urgent's KES 150 is owner-confirmed.
-// Entitlements (granting the plan/boost after settlement) land with §10.
-const PRODUCTS = [
+// Fallback purpose catalog (§9 product slots) — used ONLY until the server
+// responds (and when the gateway is unreachable offline). The LIVE catalog is
+// the `payment_purposes` DB table fetched via GET /payments/purposes, so the
+// owner can change prices/labels without an app release. `amount: null` =
+// user picks from AMOUNTS; a number = fixed price and the amount chips hide.
+// Plan/boost prices remain PROVISIONAL until the products ship (§10) — only
+// kyc_urgent's KES 150 is owner-confirmed. Entitlements land with §10.
+const DEFAULT_PRODUCTS = [
   { key: 'app_test', label: 'STK push test', amount: null },
   { key: 'kyc_urgent', label: 'KYC expedite', amount: 150 },
   { key: 'profile_boost', label: 'Profile boost', amount: 100 },
@@ -84,6 +86,16 @@ const PRODUCTS = [
   { key: 'maid_gold', label: 'Maid Gold', amount: 500 },
   { key: 'employer_gold', label: 'Employer Gold', amount: 500 },
 ];
+
+// Audience gate from the pricing table: 'system' and 'both' are visible to
+// everyone; role-scoped purposes only show for that role.
+function purposeVisible(p, role) {
+  return (
+    !p.audience || p.audience === 'both' || p.audience === 'system' ||
+    (p.audience === 'househelp' && role === 'househelp') ||
+    (p.audience === 'employer' && role === 'employer')
+  );
+}
 
 // Daraja result codes -> human sentences. Tone: neutral, specific, never
 // alarmist — 1032 (user cancelled) reads very differently from 1 (balance).
@@ -153,7 +165,8 @@ function StepRow({ state, title, sub, last }) {
 export default function PaymentScreen({ navigation }) {
   const { user, token } = useApp();
   const [amount, setAmount] = useState(1);
-  const [purpose, setPurpose] = useState('app_test'); // key into PRODUCTS
+  const [purpose, setPurpose] = useState('app_test'); // key into products
+  const [products, setProducts] = useState(DEFAULT_PRODUCTS); // live catalog replaces the fallback
   const [phone, setPhone] = useState(user?.phone || '');
   const [phoneError, setPhoneError] = useState('');
   const [error, setError] = useState('');
@@ -207,6 +220,34 @@ export default function PaymentScreen({ navigation }) {
         if (!cancelled && pend && !payment) setResumable(pend);
       } catch (e) {
         // Silent — the resume probe is a convenience, never a blocker.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // Live pricing table (§9) — labels, fixed prices and audience come from
+  // the DB so the owner can reprice without a release. Silent on failure:
+  // DEFAULT_PRODUCTS keeps checkout working offline / pre-migration.
+  useEffect(() => {
+    let cancelled = false;
+    if (!token) return undefined;
+    (async () => {
+      try {
+        const res = await api.paymentPurposes(token);
+        const rows = (res.purposes || [])
+          .filter((p) => purposeVisible(p, user?.role))
+          .map((p) => ({
+            key: p.code,
+            label: p.label,
+            description: p.description || null,
+            amount: p.amount === undefined ? null : p.amount,
+          }));
+        if (!cancelled && rows.length) setProducts(rows);
+      } catch (e) {
+        log(`purpose catalog fetch failed (${e && e.message}) — using built-in fallback`);
       }
     })();
     return () => {
@@ -320,7 +361,14 @@ export default function PaymentScreen({ navigation }) {
       );
       if (cand) {
         log(`adopted pending payment #${cand.id} (created ${cand.createdAt}) — continuing to poll`);
-        setPayment({ id: cand.id, status: 'pending', mpesaReceipt: null, resultDesc: null });
+        setPayment({
+          id: cand.id,
+          status: 'pending',
+          amount: cand.amount,
+          purposeLabel: cand.purposeLabel || null,
+          mpesaReceipt: null,
+          resultDesc: null,
+        });
         startPolling(cand.id);
         return true;
       }
@@ -340,7 +388,7 @@ export default function PaymentScreen({ navigation }) {
       setPhoneError('Enter a valid Kenyan number, e.g. 0712 345 678.');
       return;
     }
-    const product = PRODUCTS.find((p) => p.key === purpose) || PRODUCTS[0];
+    const product = products.find((p) => p.key === purpose) || products[0];
     const payAmount = product.amount || amount; // fixed price or chosen amount
     setStarting(true);
     log(`start — purpose ${product.key}, amount KES ${payAmount}, phone ${phone.trim()}`);
@@ -350,8 +398,18 @@ export default function PaymentScreen({ navigation }) {
         { amount: payAmount, phone: phone.trim(), purpose: product.key },
         token
       );
-      log(`push accepted by gateway in ${Date.now() - t0}ms — payment #${res.paymentId}${res.queued ? ' (Daraja push running in background)' : ''}`);
-      setPayment({ id: res.paymentId, status: 'pending', mpesaReceipt: null, resultDesc: null });
+      // The server may have ENFORCED the table price (tamper guard) — trust
+      // the response amount over the client's.
+      const enforced = res.amount ? Number(res.amount) : payAmount;
+      log(`push accepted by gateway in ${Date.now() - t0}ms — payment #${res.paymentId} KES ${enforced}${res.queued ? ' (Daraja push running in background)' : ''}`);
+      setPayment({
+        id: res.paymentId,
+        status: 'pending',
+        amount: enforced,
+        purposeLabel: res.purposeLabel || product.label,
+        mpesaReceipt: null,
+        resultDesc: null,
+      });
       setResumable(null);
       startPolling(res.paymentId);
     } catch (e) {
@@ -376,6 +434,8 @@ export default function PaymentScreen({ navigation }) {
     setPayment({
       id: resumable.id,
       status: resumable.status,
+      amount: resumable.amount,
+      purposeLabel: resumable.purposeLabel || null,
       mpesaReceipt: resumable.mpesaReceipt || null,
       resultDesc: resumable.resultDesc || null,
       phone: resumable.phone || null,
@@ -400,8 +460,12 @@ export default function PaymentScreen({ navigation }) {
   const pushSent = !!(payment && payment.checkoutRequestId);
   const remaining = Math.max(0, TOTAL_WAIT_S - elapsed);
   // The selected product card drives the button title and the tracker copy.
-  const product = PRODUCTS.find((p) => p.key === purpose) || PRODUCTS[0];
+  const product = products.find((p) => p.key === purpose) || products[0];
   const payAmount = product.amount || amount; // mirrors start()
+  // Truth once a payment object exists: the server-enforced amount + label
+  // (set at push time, refreshed by every poll) — not the form state.
+  const liveAmount = payment && payment.amount ? Number(payment.amount) : payAmount;
+  const liveLabel = (payment && payment.purposeLabel) || product.label;
   // Inside the Profile drawer → hamburger + HomeTab exit; root-stack copy → goBack.
   const inDrawer = typeof navigation.openDrawer === 'function';
 
@@ -410,7 +474,7 @@ export default function PaymentScreen({ navigation }) {
   const stageRows = [
     {
       title: 'Payment accepted by gateway',
-      sub: payment ? `KES ${payAmount} · ${product.label} · payment #${payment.id}` : null,
+      sub: payment ? `KES ${liveAmount} · ${liveLabel} · payment #${payment.id}` : null,
       state: 'done',
     },
     {
@@ -462,8 +526,8 @@ export default function PaymentScreen({ navigation }) {
           <SuccessMark size={148} />
           <Text style={styles.statusTitle}>Payment received</Text>
           <Text style={styles.statusBody}>
-            KES {amount} received via M-Pesa from {(payment.phone || phone).replace(/\s/g, ' ')} —
-            asante! Your payment is confirmed.
+            {liveLabel} · KES {liveAmount} received via M-Pesa from{' '}
+            {(payment.phone || phone).replace(/\s/g, ' ')} — asante! Your payment is confirmed.
           </Text>
           <View style={styles.receiptChip}>
             <Text style={styles.receiptLabel}>M-Pesa receipt</Text>
@@ -525,7 +589,7 @@ export default function PaymentScreen({ navigation }) {
         <>
           <Text style={styles.label}>Payment purpose</Text>
           <View style={styles.chipRow}>
-            {PRODUCTS.map((p) => (
+            {products.map((p) => (
               <Pressable
                 key={p.key}
                 onPress={() => {
@@ -545,7 +609,9 @@ export default function PaymentScreen({ navigation }) {
             ))}
           </View>
           <Text style={styles.purposeNote}>
-            {product.amount
+            {product.description
+              ? product.description
+              : product.amount
               ? `Fixed price · KES ${product.amount}. Plan & boost prices are provisional until the products launch.`
               : 'Test checkout — pick any amount below.'}
           </Text>

@@ -12,7 +12,7 @@
 // looked dead (hamburger/swipe showed nothing). Width is now computed from
 // the real window width (82%, capped at 320) and recomputed on rotation.
 import React, { useState } from 'react';
-import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   createDrawerNavigator,
@@ -71,9 +71,13 @@ function BrandDrawerContent({ navigation, state }) {
     >
       {/* Identity header */}
       <View style={styles.head}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
-        </View>
+        {user?.avatarUrl ? (
+          <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+        ) : (
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           <Text style={styles.name} numberOfLines={1}>
             {user?.fullName || 'Member'}
@@ -176,6 +180,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: colors.gold,
+  },
+  avatarImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: colors.gold,
+    backgroundColor: colors.brandSoftBg,
   },
   avatarText: { fontSize: 18, fontWeight: '800', color: colors.brand },
   name: { fontSize: 16.5, fontWeight: '800', color: colors.ink },

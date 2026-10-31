@@ -55,6 +55,8 @@ function publicUser(u) {
     latitude: u.latitude === null || u.latitude === undefined ? null : Number(u.latitude),
     longitude: u.longitude === null || u.longitude === undefined ? null : Number(u.longitude),
     myReferralCode: u.my_referral_code,
+    // Media subdomain profile photo (public URL, set via POST /api/media/avatar)
+    avatarUrl: u.avatar_url || null,
     // §4.2 — derived at read time, never stored as booleans
     phoneVerified: !!u.phone_verified_at,
     emailVerified: !!u.email_verified_at,

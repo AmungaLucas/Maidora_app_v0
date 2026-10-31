@@ -307,14 +307,19 @@ router.get('/images/:field', async (req, res, next) => {
     if (!u || !u[spec.col]) return res.status(404).json({ message: 'Not found' });
 
     // Basename prevents any path traversal from a tampered column value.
+    // New uploads (POST /api/media/kyc/:field) live in the media subdomain's
+    // kyc/ dir (web-denied); pre-media uploads stay in the legacy
+    // kyc_uploads/. Try media first, then legacy — both basenames only.
     const file = path.join(config.kyc.uploadDir, path.basename(String(u[spec.col])));
-    if (!fs.existsSync(file)) return res.status(404).json({ message: 'Not found' });
+    const mediaFile = path.join(config.media.dir, 'kyc', path.basename(String(u[spec.col])));
+    const resolved = fs.existsSync(mediaFile) ? mediaFile : file;
+    if (!fs.existsSync(resolved)) return res.status(404).json({ message: 'Not found' });
 
-    const ext = path.extname(file).toLowerCase();
+    const ext = path.extname(resolved).toLowerCase();
     const type = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
     res.setHeader('Content-Type', type);
     res.setHeader('Cache-Control', 'private, no-store');
-    return res.sendFile(file);
+    return res.sendFile(resolved);
   } catch (e) {
     return next(e);
   }

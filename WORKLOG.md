@@ -6,6 +6,79 @@
 
 ---
 
+## 2026-10-31 — Pricing table + media.maidora.co.ke pipeline + capture crash fix + admin spec
+
+Owner: pricing needs a **table** (prices change) · prepare the **admin
+dashboard documentation** (build later) · fix `Cannot read property 'step'
+of undefined` · next step: **secure media upload** (KYC docs + profile
+photos, WebP) on the newly created `media.maidora.co.ke` subdomain.
+
+- **Capture crash ROOT CAUSE** ("step" of undefined): the wrapper screens
+  (`KycDocFront/Back/Selfie`) pass the capture target as a PROP, but
+  `DocCaptureScreen` read `route.params?.field` — undefined on the normal
+  forward flow (params only carry `{ draft }`), so `CONFIG[undefined]` blew
+  up the moment the user reached step 3 (owner hit it right after the
+  dead-Continue fix unblocked the flow). Fixed prop-first + params-fallback;
+  unknown fields render a graceful fallback instead of crashing. Also found
+  and fixed two siblings in the same screen: `CONFIG.selfie` had NO `next`
+  (selfie Continue would have thrown `cfg.next is not a function` — it now
+  navigates to `KycReview`), and the draft image keys were mismatched
+  (`idFront` camelCase in the draft vs `id_front` snake_case reads in
+  capture + review — remote images silently never showed). `IMG_KEY` in
+  `kycShared` is now the single mapping; render smoke asserts KycShell
+  receives the right title/step for all three fields + the fallback.
+- **Pricing table (migrate_v5)**: `payment_purposes` is the §9 source of
+  truth — label, description, `amount_kes` (NULL = any amount), audience
+  (`system|both|househelp|employer`), STK ref/desc labels, `is_active`,
+  `sort_order`; seeded 8 rows (app_test any · kyc_urgent 150 ·
+  profile_boost 100 · maid_basic 200 · maid_gold 500 · employer_gold 500
+  active; application 20 · application_boost 50 INACTIVE). Gateway:
+  `GET /payments/purposes` serves the catalog; stk-push REJECTS unknown
+  purposes (400 `bad_purpose`) and inactive ones (409 `purpose_inactive`)
+  and **enforces fixed prices server-side** (client amount overridden + log
+  line) — a tampered client cannot underpay a plan. Purpose label joins the
+  list/status views → the success card now reads "Maid Gold · KES 500".
+  App: PaymentScreen fetches the live catalog on mount (role-filtered by
+  audience) with `DEFAULT_PRODUCTS` as offline fallback; the provisional
+  note comes from the table's `description`.
+- **Media pipeline (`backend/src/routes/media.js`)**: `POST /media/avatar`
+  and `POST /media/kyc/:field` — base64 JSON ≤5 MB decoded, magic-byte
+  sniff (WebP/JPEG/PNG, never the claimed mime), sha256, `media_assets`
+  audit rows, old-file replace, names `<ts>_<96-bit random>`. Avatars →
+  `media.maidora.co.ke/avatars/` PUBLIC (unguessable name + immutable
+  cache), URL on `users.avatar_url` (v5 column) and in every `publicUser`.
+  KYC docs → `media.maidora.co.ke/kyc/` **web-denied** (`Require all
+  denied`), streamed only via the authenticated `GET /kyc/images/:field`
+  (now resolves media dir first, legacy `kyc_uploads/` second). Managed
+  `.htaccess` trio: root hardening (no indexes, no script execution, dotfiles
+  denied, nosniff), avatars cache policy, kyc deny. **LiteSpeed uid trap
+  (E2E-proven): 0600 avatars → 403, 0644 → 200 `image/webp`** — LiteSpeed
+  reads under a different uid than the app owner; avatars are 0644 (privacy
+  from the random name), KYC stays 0600 (only the API reads it).
+- **App WebP pipeline**: `processToWebp` in kycShared (expo-image-manipulator
+  `SaveFormat.WEBP`, ≤1400 px docs / ≤900 px selfie, q0.8) — captures +
+  avatar uploads are WebP now (~half the JPEG bytes). DocCaptureScreen
+  uploads via `POST /media/kyc/:field`; ProfileScreen gets a camera-badge
+  avatar (library pick → square crop → 600 px WebP → `/media/avatar` →
+  instant context update) and the Profile drawer header shows the photo.
+- **Admin dashboard spec**: `docs/Admin_Dashboard_Spec.md` — control-panel
+  build doc grounded in the live schema: RBAC (`admin_users` owner/reviewer/
+  support + audit trail), KYC review queue (admin-scoped media reader),
+  users/transactions modules, the `payment_purposes` pricing editor (M3 —
+  closes the no-app-release pricing loop), analytics, reports & disputes,
+  `event_log` monitoring, 4 build phases, open questions.
+- **Deploy + E2E**: migrate_v5 on the live DB (payment_purposes 8 rows,
+  media_assets, avatar_url); E2E 22/22 — purposes catalog (table source,
+  inactive hidden), maid_gold price enforcement (client 100 → row 500.00),
+  unknown/inactive guards, real-WebP avatar upload → public URL serves
+  `image/webp` + RIFF magic, KYC upload → public URL 403 + dir listing 403 +
+  authenticated stream 200, `/auth/me` exposes `avatarUrl`, garbage bytes
+  400, cascade cleanup verified.
+- **Validation**: node --check 7/7 backend files; check_jsx 10/10 app files;
+  render smoke `scripts/smoke_media_round.js` 16/16.
+
+---
+
 ## 2026-10-31 — Payment purposes + KYC personal-step fixes (owner live report)
 
 Owner: payment purposes wanted ("STK Push test, KYC expeditiation, Profile

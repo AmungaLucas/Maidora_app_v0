@@ -19,6 +19,17 @@ export const KYC_STEPS = {
 };
 export const KYC_TOTAL_STEPS = 6;
 
+// Server field names (API + `kyc://field` markers) -> draft.images keys.
+// The draft keeps camelCase keys (emptyDraft below); every server touchpoint
+// (POST /media/kyc/:field, /kyc/images/:field, kyc:// markers) is snake_case.
+// DocCaptureScreen and KycReviewScreen map through this — mixing them up is
+// exactly what silently hid remote images from the capture/review screens.
+export const IMG_KEY = {
+  id_front: 'idFront',
+  id_back: 'idBack',
+  selfie: 'selfie',
+};
+
 // §33.3 rejection enum -> human words (banner: "Action needed: {reason}")
 export const REASON_LABELS = {
   unreadable_document: 'Unreadable document photo',
@@ -97,9 +108,31 @@ export function formatDate(iso) {
 }
 
 // ---- image capture ---------------------------------------------------------
-// v1 quality pipeline: crop (allowsEditing), downscale to ≤1400 px, compress
-// JPEG ~0.78. Blur/glare ML detection lands with the EAS dev build (same
-// deferral pattern as SMS Retriever — zero-native layers ship today).
+// v2 quality pipeline: crop (allowsEditing), downscale (≤1400 px documents /
+// ≤900 px selfie), encode WebP ~0.8. WebP roughly halves the upload size vs
+// JPEG at the same visual quality — faster uploads on Kenyan mobile data and
+// cheaper storage on the media subdomain. The server magic-byte sniffs every
+// upload anyway, so a device that falls back to JPEG still stores correctly
+// (extension follows the sniffed bytes, never the claimed mime). Blur/glare
+// ML detection lands with the EAS dev build (same deferral pattern as SMS
+// Retriever — zero-native layers ship today).
+
+export async function processToWebp(picked, maxW = 1400) {
+  let ref = ImageManipulator.manipulate(picked.uri);
+  if ((picked.width || 0) > maxW) ref.resize({ width: maxW });
+  const rendered = await ref.renderAsync();
+  const saved = await rendered.saveAsync({ compress: 0.8, format: SaveFormat.WEBP, base64: true });
+  return { uri: saved.uri, base64: saved.base64, mime: 'image/webp' };
+}
+
+// JPEG fallback retained for callers that specifically need JPEG.
+export async function processToJpeg(picked, maxW = 1400) {
+  let ref = ImageManipulator.manipulate(picked.uri);
+  if ((picked.width || 0) > maxW) ref.resize({ width: maxW });
+  const rendered = await ref.renderAsync();
+  const saved = await rendered.saveAsync({ compress: 0.78, format: SaveFormat.JPEG, base64: true });
+  return { uri: saved.uri, base64: saved.base64, mime: 'image/jpeg' };
+}
 
 async function ensureCameraPermission() {
   const { granted, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
@@ -125,14 +158,6 @@ async function ensureLibraryPermission() {
   return false;
 }
 
-export async function processToJpeg(picked, maxW = 1400) {
-  let ref = ImageManipulator.manipulate(picked.uri);
-  if ((picked.width || 0) > maxW) ref.resize({ width: maxW });
-  const rendered = await ref.renderAsync();
-  const saved = await rendered.saveAsync({ compress: 0.78, format: SaveFormat.JPEG, base64: true });
-  return { uri: saved.uri, base64: saved.base64, mime: 'image/jpeg' };
-}
-
 // Document capture: camera or gallery, cropped to an ID-card-ish frame.
 export async function captureDocument() {
   return new Promise((resolve) => {
@@ -148,7 +173,7 @@ export async function captureDocument() {
             quality: 0.85,
           });
           if (r.canceled || !r.assets?.length) return resolve(null);
-          resolve(await processToJpeg(r.assets[0]));
+          resolve(await processToWebp(r.assets[0]));
         },
       },
       {
@@ -162,7 +187,7 @@ export async function captureDocument() {
             quality: 0.85,
           });
           if (r.canceled || !r.assets?.length) return resolve(null);
-          resolve(await processToJpeg(r.assets[0]));
+          resolve(await processToWebp(r.assets[0]));
         },
       },
       { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
@@ -181,7 +206,7 @@ export async function captureSelfie() {
     quality: 0.85,
   });
   if (r.canceled || !r.assets?.length) return null;
-  return processToJpeg(r.assets[0], 900);
+  return processToWebp(r.assets[0], 900);
 }
 
 // ---- shell -----------------------------------------------------------------

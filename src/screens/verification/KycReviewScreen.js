@@ -9,6 +9,7 @@ import { colors, radius } from '../../theme';
 import { Banner, PrimaryButton } from '../../ui';
 import {
   ID_TYPE_LABELS,
+  IMG_KEY,
   KycShell,
   formatDate,
   kycImageSource,
@@ -58,7 +59,7 @@ export default function KycReviewScreen({ navigation, route }) {
     { label: 'Document front', field: 'id_front', target: 'KycDocFront', thumb: ks.reviewThumb },
     { label: 'Document back', field: 'id_back', target: 'KycDocBack', thumb: ks.reviewThumb },
     { label: 'Selfie', field: 'selfie', target: 'KycSelfie', thumb: ks.reviewThumbSelfie },
-  ].filter((i) => i.field !== 'id_back' || draft.idType === 'national_id' || draft.images.id_back);
+  ].filter((i) => i.field !== 'id_back' || draft.idType === 'national_id' || draft.images[IMG_KEY.id_back]);
 
   return (
     <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -95,7 +96,7 @@ export default function KycReviewScreen({ navigation, route }) {
             <View key={img.field}>
               {i > 0 ? <View style={ks.reviewDivider} /> : null}
               <View style={ks.reviewImgRow}>
-                <Image source={kycImageSource(draft.images[img.field], img.field, token)} style={img.thumb} resizeMode="cover" />
+                <Image source={kycImageSource(draft.images[IMG_KEY[img.field]], img.field, token)} style={img.thumb} resizeMode="cover" />
                 <Text style={[ks.reviewLabel, { flex: 1 }]}>{img.label}</Text>
                 <Pressable hitSlop={8} onPress={() => retake(img.target)}>
                   <Text style={ks.retakeLink}>Retake</Text>

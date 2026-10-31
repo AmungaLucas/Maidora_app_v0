@@ -55,12 +55,23 @@ const config = {
     from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
   },
 
-  // §8 KYC — private image storage. Files live under the app root but are
-  // NEVER web-served: kyc_uploads/.htaccess denies direct access and the only
-  // read path is the authenticated /api/kyc/images/:field route. Override
-  // with KYC_UPLOAD_DIR if the layout ever changes.
+  // §8 KYC — private image storage (legacy layout). Files live under the app
+  // root but are NEVER web-served: kyc_uploads/.htaccess denies direct access
+  // and the only read path is the authenticated /api/kyc/images/:field route.
+  // Override with KYC_UPLOAD_DIR if the layout ever changes.
   kyc: {
     uploadDir: process.env.KYC_UPLOAD_DIR || path.join(__dirname, '..', '..', 'kyc_uploads'),
+  },
+
+  // §8/§13 media pipeline — media.maidora.co.ke subdomain (owner-created,
+  // docroot /home/maidorac/media.maidora.co.ke). All uploaded media lives
+  // here: avatars/ is PUBLIC (unguessable 128-bit names, web-served with
+  // immutable caching), kyc/ is web-DENIED and streams only through the
+  // authenticated /api/kyc/images/:field route. MEDIA_DIR/MEDIA_BASE_URL are
+  // set in the server .env.
+  media: {
+    dir: process.env.MEDIA_DIR || '/home/maidorac/media.maidora.co.ke',
+    baseUrl: (process.env.MEDIA_BASE_URL || 'https://media.maidora.co.ke').replace(/\/+$/, ''),
   },
 
   // Safaricom Daraja — M-Pesa STK Push (Lipa na M-Pesa Online, production)

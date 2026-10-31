@@ -36,10 +36,13 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
 | KYC flow (§8) | 🟡 SUBMISSION LIVE | 8-step app flow + draft/images/submit API + urgent KSh 150 STK grant; review tooling + blur/glare ML deferred (see §10). **Personal step fixes 2026-10-31 (owner live report)**: DOB now prefills from the §7 profile when the KYC draft is empty (same lowercase gender enum, 1:1); DOB state is ISO-only (the display string was being round-tripped through a DD-MM-YYYY parser — EVERY picker-picked DOB failed Continue with an error that was never rendered, i.e. the dead-Continue bug); `errors.dob` now renders (red text + field border); gender pills rebuilt (icon + label, forest fill + cream text + check when selected — the old SecondaryButton chips were forest-on-forest when selected) |
+| Pricing table `payment_purposes` (§9) | ✅ LIVE | migrate_v5 (2026-10-31): purpose catalog moved OUT of the app into the DB — label, description, `amount_kes` (NULL = any), audience, STK labels, `is_active`, `sort_order`. `GET /api/payments/purposes` feeds the app picker (owner changes prices with NO app release); stk-push validates (unknown→400, inactive→409) and **enforces fixed prices server-side**; purpose label joined onto payment views so the success screen shows "Maid Gold · KES 500". Seeded: app_test any · kyc_urgent 150 (owner-confirmed) · profile_boost 100 · maid_basic 200 · maid_gold 500 · employer_gold 500 (provisional); application/application_boost seeded INACTIVE. E2E 22/22 |
+| Media pipeline `media.maidora.co.ke` (§5.5) | ✅ LIVE | Owner-created subdomain; `POST /media/avatar` (public, unguessable names, immutable cache) + `POST /media/kyc/:field` (web-DENIED dir, authenticated stream only). Base64 JSON ≤5 MB, magic-byte sniff (WebP/JPEG/PNG), sha256, `media_assets` audit rows, old-file replace. Client converts captures to **WebP** before upload (≤1400 px docs / ≤900 px selfie / ≤600 px avatar). Avatar upload wired into ProfileScreen (camera-badge button) + drawer identity header. LiteSpeed uid trap solved (avatars 0644, KYC 0600). E2E 22/22 incl. deny + magic checks |
+| KYC capture crash fix (owner live report) | ✅ LIVE | "Cannot read property 'step' of undefined" — the wrapper screens pass the capture target as a PROP but DocCaptureScreen read `route.params?.field` (undefined on the normal forward flow → `CONFIG[undefined]` → crash the moment the user reached step 3, exactly the report). Now prop-first + params-fallback; unknown field renders a graceful fallback (never crashes); selfie Continue → KycReview (CONFIG.selfie had NO `next` — second latent TypeError); draft image keys unified via `IMG_KEY` (`id_front`↔`idFront` mix-up silently hid remote images on capture + review screens). Render smoke 16/16 |
 | Paywall after 2 applications (§9) | ⏳ PENDING | Needs applications first |
 | Visibility decay ranking (§10) | ⏳ PENDING | `last_active_at` collected; ranking ships with search |
 | Real chat backend | ⏳ PENDING | Chats tab is a placeholder |
-| Post-onboarding suggestion cards (§13) | ⏳ PENDING | |
+| Admin dashboard (§13 control panel) | 📐 SPEC READY | `docs/Admin_Dashboard_Spec.md` (2026-10-31): RBAC admin_users, KYC review queue (admin-scoped media reader), users/transactions/pricing-editor modules, analytics, reports & disputes, event_log monitoring; 4 build phases (M1 read-spine → M4 trust ops). Not started — build later |
 | SMS Retriever OTP autofill | ⏸️ DEFERRED | Needs EAS dev build; zero-native layers ship today (§5.7) |
 | Push notifications | ⏳ PENDING | |
 
@@ -193,8 +196,9 @@ src/config/db.js        MySQL pool (lazy)
 src/routes/health.js    /api/health, /api/db-health
 src/routes/auth.js      register | verify-otp | resend-otp | login | onboarding | me | email verification
 src/routes/profile.js   GET/PUT maid profile + derived completeness (§7)
-src/routes/kyc.js       KYC state | draft autosave | image upload (base64) | submit | private image stream (§8)
-src/routes/payments.js  stk-push (§5 gated) | list | :id status | callback (grants kyc_urgent)
+src/routes/kyc.js       KYC state | draft autosave | legacy image upload | submit | private image stream (§8)
+src/routes/media.js     media pipeline: avatar (public) + KYC docs (private) → media.maidora.co.ke (§5.5)
+src/routes/payments.js  purposes (pricing table) | stk-push (§5 gated) | list | :id status | callback (grants kyc_urgent)
 src/services/otp.js     hashed OTPs (phone + email), cooldown/hourly/attempt caps
 src/services/sms.js     TalkSasa API v3 client
 src/services/email.js   nodemailer SMTP (optional email verification, fails soft)
@@ -203,7 +207,15 @@ src/middleware/auth.js  requireAuth (JWT 30d + last_active_at 1h-throttled), req
 src/utils/validate.js   shared validation + disposable-email blocklist (mirrors app's src/validation.js)
 sql/schema.sql          v2 canonical (idempotent)
 sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per release)
+sql/migrate_v5.js       v5: payment_purposes + media_assets + users.avatar_url (idempotent)
 ```
+
+### 5.1b Media subdomain
+
+`media.maidora.co.ke` (owner-created cPanel subdomain) — docroot
+`/home/maidorac/media.maidora.co.ke`, served by LiteSpeed, NOT the Node app:
+`avatars/` (public) and `kyc/` (web-DENIED) with managed `.htaccess` files
+(the media route re-writes them idempotently on boot). See §5.5.
 
 ### 5.2 Endpoints
 
@@ -226,10 +238,13 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 | POST `/api/kyc/images` | JWT | one image per call (base64 JSON, ≤5 MB, magic-sniffed) → private `kyc_uploads/` |
 | POST `/api/kyc/submit` | JWT + **verified** | completeness check → `kyc_status='submitted'` + `kyc_submitted_at`; writes lock (409) |
 | GET `/api/kyc/images/:field` | JWT | streams the caller's own stored image (private dir; admin review access later) |
-| POST `/api/payments/stk-push` | JWT + **verified** | `{amount, phone?, purpose?}` → STK prompt (§5 gate); purpose `kyc_urgent` = KSh 150 expedite |
-| GET `/api/payments` | JWT | user's last 20 payments |
-| GET `/api/payments/:id?refresh=1` | JWT | status; `refresh=1` may live-query Daraja (§6.2) |
+| POST `/api/payments/stk-push` | JWT + **verified** | `{amount, phone?, purpose?}` → STK prompt (§5 gate); purpose validated against `payment_purposes` (unknown→400, inactive→409) and **fixed prices enforced server-side** (client cannot underpay a plan); purpose `kyc_urgent` = KSh 150 expedite |
+| GET `/api/payments/purposes` | JWT | the §9 pricing catalog from the `payment_purposes` TABLE (label/description/amount/audience, `is_active=1` only) — the app renders this instead of a hardcoded list; legacy-map fallback when the table is absent |
+| GET `/api/payments` | JWT | user's last 20 payments (purpose label joined) |
+| GET `/api/payments/:id?refresh=1` | JWT | status (purpose label joined); `refresh=1` may live-query Daraja (§6.2) |
 | POST `/api/payments/callback` | **public** | Daraja result receiver — ACKs fast |
+| POST `/api/media/avatar` | JWT | profile photo (base64 WebP/JPEG/PNG, ≤5 MB, magic-sniffed) → public `media.maidora.co.ke/avatars/…` URL on `users.avatar_url` + `media_assets` row; replaces (deletes) the previous file |
+| POST `/api/media/kyc/:field` | JWT | KYC doc `id_front\|id_back\|selfie` (same validation) → web-DENIED `kyc/` dir, basename on `users.kyc_*_url`, `media_assets` audit row; same `{ok, field}` contract as the legacy `/kyc/images` (which stays for compatibility) |
 
 ### 5.3 Environment variables (names only — values in server `.env`)
 
@@ -243,6 +258,7 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
 `MPESA_PROD_CONSUMER_KEY` / `_CONSUMER_SECRET` / `_BUSINESS_SHORTCODE` /
 `_TRANSACTION_TYPE` / `_PARTY_B` / `_PASSKEY` · `MPESA_CALLBACK_URL` ·
 `MPESA_ACCOUNT_REFERENCE` (Maidora, ≤12 — fallback only; the per-purpose `PURPOSE_STK` map in `routes/payments.js` overrides) · `MPESA_TRANSACTION_DESC` (≤13, fallback only) ·
+`MEDIA_DIR` (docroot `/home/maidorac/media.maidora.co.ke`) · `MEDIA_BASE_URL` (`https://media.maidora.co.ke`) ·
 `NODE_ENV=production`.
 
 ### 5.4 Database
@@ -271,11 +287,51 @@ sql/migrate_v2.js       live-DB migration v1→v2 (guarded ALTERs, run once per 
   `result_desc`, `status` enum(`pending`,`success`,`failed`),
   `raw_callback` (full Daraja JSON), timestamps. MySQL typed the JSON column
   as `longtext` — harmless.
+- **payment_purposes (v5)** — the §9 PRICING TABLE, source of truth for what
+  can be paid for and what it costs: `code` PK, `label`, `description`,
+  `amount_kes` (NULL = caller picks), `audience` enum(`system`,`both`,
+  `househelp`,`employer`), `stk_ref`/`stk_desc` (STK labels), `is_active`,
+  `sort_order`. Owner edits rows (dashboard later, §13) — no app release.
+  stk-push: unknown→400 `bad_purpose`, inactive→409 `purpose_inactive`,
+  fixed price **enforced** (client amount overridden + logged). Seeded:
+  app_test(any) · kyc_urgent 150 · profile_boost 100 · maid_basic 200 ·
+  maid_gold 500 · employer_gold 500 (active); application 20 ·
+  application_boost 50 (INACTIVE until those products ship). Prices marked
+  provisional except kyc_urgent.
+- **media_assets (v5)** — upload audit trail: `user_id`, `kind`
+  enum(`avatar`,`id_front`,`id_back`,`selfie`), `storage_path` (relative to
+  the media root), `public_url` (avatars), `bytes`, `mime` (SNIFFED),
+  `sha256`. Feeds the admin dashboard (§13) audit + cleanup.
+- **users.avatar_url (v5)** — public avatar URL; exposed as `avatarUrl` in
+  every `publicUser` shape (`/auth/me`, login, verify-otp).
 
 **Schema migrations:** `schema.sql` is the canonical fresh-install DDL
 (idempotent `IF NOT EXISTS`). For the LIVE DB, run
-`nodevenv/…/bin/node sql/migrate_v2.js` — every ALTER is guarded by an
+`nodevenv/…/bin/node sql/migrate_vN.js` — every ALTER is guarded by an
 `INFORMATION_SCHEMA` check, so it is safe to re-run.
+
+### 5.5 Media pipeline (media.maidora.co.ke, 2026-10-31)
+
+All uploads are base64 JSON (same shape as the KYC legacy route), capped at
+5 MB decoded, magic-byte SNIFFED (WebP/JPEG/PNG — never the declared mime),
+sha256-hashed, logged to `media_assets`, filenames `<ts>_<96-bit random>`.
+The client converts to WebP before upload (expo-image-manipulator
+`SaveFormat.WEBP`, ≤1400 px docs / ≤900 px selfie / ≤600 px avatar).
+
+| Class | Location | Exposure |
+|---|---|---|
+| avatars | `media.maidora.co.ke/avatars/` | **public** via the subdomain; privacy = unguessable 128-bit name; immutable-cache headers; 0644 |
+| KYC docs | `media.maidora.co.ke/kyc/` | web-DENIED (`Require all denied`); readable ONLY through authenticated `GET /api/kyc/images/:field` (streams the caller's OWN file, basename-resolved, legacy `kyc_uploads/` still honoured); 0600 |
+
+`.htaccess` hardening (written by the media route + deploys): root —
+`Options -Indexes`, script execution removed/denied, dotfiles denied,
+`nosniff`; `avatars/` — public cache; `kyc/` — deny-all.
+
+**LiteSpeed permission trap (E2E-proven):** LiteSpeed reads files under a
+DIFFERENT uid than the app owner — avatars written 0600 returned 403 while
+0644 serves `image/webp` 200. Avatars are 0644 (privacy from the random
+name); KYC files stay 0600 because only the API (running as the owner uid)
+ever reads them.
 
 ---
 
@@ -454,8 +510,10 @@ new columns need explicit `ALTER TABLE` verification.
 ## 10. Pending work / roadmap
 
 **Next up (spec §14 order):** KYC **review tooling** — admin screen to view
-submissions (own-image streaming route exists; needs admin scope + approve/
-reject with the §33.3 enum) · blur/glare ML detection + real liveness/face-
+submissions (own-image streaming route exists; media pipeline now stores the
+documents under `media.maidora.co.ke/kyc/` web-denied — the admin reader
+from `docs/Admin_Dashboard_Spec.md` M2 plugs straight in) · blur/glare ML
+detection + real liveness/face-
 match deferred to the EAS dev build (zero-native layers ship today) · jobs
 listings CRUD + Find Jobs feed · applications + §9 welcome bonus (2
 lifetime) + paywall (tiers DECIDED via MPS Amendment v3.2 — PAYG KSh 50 /
@@ -463,6 +521,12 @@ Basic KSh 99 / Gold KSh 199 + boosts; only multi-device session policy
 §15.6 still open) · search/matching with location + §10 decay ranking ·
 real chat backend · §13 suggestion cards (day-based, dismissible) · push
 notifications.
+
+**Admin dashboard (§13):** spec approved 2026-10-31 —
+`docs/Admin_Dashboard_Spec.md`. Build later, M1 read-spine first (admin
+login/RBAC, KPIs, users, payments). The `payment_purposes` pricing editor
+(M3) completes the "prices change without an app release" loop started by
+migrate_v5.
 
 **Gateway hardening:** cron to expire stale `pending` payments (e.g. > 24 h)
 · log rotation/monitoring · optional IP filtering on the callback route ·

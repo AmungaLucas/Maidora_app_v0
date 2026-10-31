@@ -12,11 +12,13 @@
 // Completeness lives in AppContext, so every wizard save updates the Home
 // banner instantly. Verification / Payments / Settings live in the drawer.
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
 import { ROLES, colors, radius } from '../../theme';
+import { processToWebp } from '../verification/kycShared';
 import {
   Banner,
   BottomSheetModal,
@@ -31,13 +33,15 @@ import CompletenessWizard from './CompletenessWizard';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export default function ProfileScreen({ navigation }) {
-  const { user, token, profileCompleteness, setProfileCompleteness } = useApp();
+  const { user, token, profileCompleteness, setProfileCompleteness, updateUser } = useApp();
   const isHousehelp = user?.role === 'househelp';
   const isEmployer = user?.role === 'employer';
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [emailSheetOpen, setEmailSheetOpen] = useState(false);
   const [savedNote, setSavedNote] = useState('');
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
 
   const completeness = profileCompleteness;
   const hasProfileSection = isHousehelp || isEmployer;
@@ -63,6 +67,39 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
+  // §8/§13 media pipeline — profile photo: pick → square-crop → WebP ≤600 px
+  // → POST /media/avatar → public media.maidora.co.ke URL on users.avatar_url.
+  const pickAvatar = async () => {
+    if (avatarBusy) return;
+    setAvatarError('');
+    const { granted, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!granted) {
+      setAvatarError(
+        canAskAgain
+          ? 'Allow Maidora to access your photos to add a profile photo.'
+          : 'Photo access is off for Maidora. Enable it in Settings to add a photo.'
+      );
+      return;
+    }
+    const r = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (r.canceled || !r.assets?.length) return;
+    setAvatarBusy(true);
+    try {
+      const shot = await processToWebp(r.assets[0], 600);
+      const res = await api.uploadAvatar(shot.base64, shot.mime, token);
+      await updateUser({ avatarUrl: res.url });
+    } catch (e) {
+      setAvatarError(e.message || 'Could not upload the photo. Check your connection and try again.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
   return (
     <Screen keyboard={false} edges={['top', 'left', 'right']}>
       {/* Header — hamburger LEFT (drawer opens from the left) */}
@@ -71,11 +108,22 @@ export default function ProfileScreen({ navigation }) {
         <Text style={styles.headerTitle}>Profile</Text>
       </View>
 
-      {/* 1 — Identity */}
+      {/* 1 — Identity (tap the avatar to add/change the profile photo) */}
       <View style={styles.identityCard}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
-        </View>
+        <Pressable onPress={pickAvatar} disabled={avatarBusy} style={({ pressed }) => [styles.avatarWrap, pressed && { opacity: 0.85 }]} hitSlop={6}>
+          {user?.avatarUrl ? (
+            <Image source={{ uri: user.avatarUrl }} style={styles.avatar} resizeMode="cover" />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          )}
+          <View style={styles.avatarEdit}>
+            <Ionicons name="camera" size={12} color={colors.cream} />
+          </View>
+        </Pressable>
+        {avatarBusy ? <Text style={styles.avatarBusyText}>Uploading photo…</Text> : null}
+        <Banner kind="error" message={avatarError} />
         <Text style={styles.name}>{user?.fullName}</Text>
         <View style={styles.roleBadge}>
           <Ionicons
@@ -430,6 +478,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarWrap: { alignSelf: 'center' },
+  avatarEdit: {
+    position: 'absolute',
+    right: 0,
+    bottom: 2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.brand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.card,
+  },
+  avatarBusyText: { marginTop: 8, fontSize: 12, color: colors.muted },
   avatarText: { fontSize: 28, fontWeight: '800', color: colors.brand },
   name: { marginTop: 12, fontSize: 19, fontWeight: '800', color: colors.ink },
   roleBadge: {

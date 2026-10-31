@@ -110,6 +110,9 @@ export const api = {
   saveProfile: (payload, token) =>
     request('/profile', { method: 'PUT', body: payload, token }),
 
+  // GET /payments/purposes — the §9 pricing table (labels + fixed prices,
+  // editable server-side without an app release)
+  paymentPurposes: (token) => request('/payments/purposes', { token }),
   // POST /payments/stk-push — { amount, phone?, purpose? } -> { paymentId, checkoutRequestId, message }
   mpesaStkPush: (payload, token) =>
     request('/payments/stk-push', { method: 'POST', body: payload, token, timeoutMs: 30000 }),
@@ -124,11 +127,28 @@ export const api = {
   // PUT /kyc/draft — autosave personal details / document type (debounced)
   kycSaveDraft: (patch, token) =>
     request('/kyc/draft', { method: 'PUT', body: patch, token }),
-  // POST /kyc/images — { field, dataBase64, mime } (base64 JSON; big body)
+  // POST /kyc/images — legacy image upload (kept for compatibility; the app
+  // now uses the media pipeline below)
   kycUploadImage: (field, dataBase64, mime, token) =>
     request('/kyc/images', {
       method: 'POST',
       body: { field, dataBase64, mime },
+      token,
+      timeoutMs: 60000,
+    }),
+  // POST /media/kyc/:field — WebP-first KYC document upload (media.maidora.co.ke)
+  mediaKycUpload: (field, dataBase64, mime, token) =>
+    request(`/media/kyc/${field}`, {
+      method: 'POST',
+      body: { dataBase64, mime },
+      token,
+      timeoutMs: 60000,
+    }),
+  // POST /media/avatar — profile photo upload (public media.maidora.co.ke URL)
+  uploadAvatar: (dataBase64, mime, token) =>
+    request('/media/avatar', {
+      method: 'POST',
+      body: { dataBase64, mime },
       token,
       timeoutMs: 60000,
     }),

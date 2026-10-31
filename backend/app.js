@@ -14,6 +14,7 @@ const authRoutes = require('./src/routes/auth');
 const paymentsRoutes = require('./src/routes/payments');
 const profileRoutes = require('./src/routes/profile');
 const kycRoutes = require('./src/routes/kyc');
+const mediaRoutes = require('./src/routes/media');
 
 const app = express();
 
@@ -31,6 +32,10 @@ app.use((req, res, next) => {
 // KYC router with its own larger body parser BEFORE the global 256kb one.
 // body-parser skips requests it has already parsed, so nothing double-runs.
 app.use('/api/kyc', express.json({ limit: '12mb' }), kycRoutes);
+
+// Media uploads (avatars + KYC documents, WebP-first) use the same base64
+// JSON shape — same 12 MB parser allowance.
+app.use('/api/media', express.json({ limit: '12mb' }), mediaRoutes);
 
 app.use(express.json({ limit: '256kb' }));
 

@@ -49,6 +49,9 @@ const DEFINITIVE_FAILURE_CODES = new Set(['1', '1032', '1037']);
 // shows only the business name — the reference lands on the confirmation SMS
 // and the M-Pesa statement; a PayBill-type shortcode additionally shows it
 // on the prompt as "… for account <ref>".
+// LEGACY FALLBACK ONLY: since migrate_v5 the catalog lives in the
+// `payment_purposes` TABLE (prices are editable without an app release).
+// This map only covers a catalog fetch failure so checkout never hard-stops.
 const PURPOSE_STK = {
   app_test:          { ref: 'TEST',         desc: 'Test payment' },
   general:           { ref: 'MAIDORA',      desc: 'Maidora' },
@@ -65,10 +68,27 @@ const stkRef = (s) =>
 const stkDesc = (s) =>
   String(s).replace(/[^A-Za-z0-9 .-]/g, '').trim().slice(0, 13) || 'Maidora';
 
+// Load one purpose row from the pricing table (migrate_v5). Returns null when
+// the code is unknown or the table is not migrated yet (legacy behavior).
+async function loadPurpose(code) {
+  try {
+    const [[row]] = await pool.query(
+      'SELECT code, label, description, amount_kes, audience, stk_ref, stk_desc, is_active FROM payment_purposes WHERE code = ? LIMIT 1',
+      [code]
+    );
+    return row || null;
+  } catch (e) {
+    // Table missing (pre-v5 deploy race) — degrade to the legacy map.
+    console.warn('[payments] purpose catalog unavailable, using legacy map:', e.message);
+    return null;
+  }
+}
+
 function paymentView(p) {
   return {
     id: p.id,
     purpose: p.purpose,
+    purposeLabel: p.purpose_label || null,
     amount: Number(p.amount),
     phone: p.phone,
     status: p.status,
@@ -98,6 +118,40 @@ async function grantKycUrgent(userId) {
   }
 }
 
+// GET /api/payments/purposes — the §9 pricing table for the picker.
+// The app renders this instead of a hardcoded list, so the owner can change
+// prices/labels from the dashboard (§13) without an app-store release.
+router.get('/purposes', requireAuth, async (req, res, next) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT code, label, description, amount_kes, audience
+       FROM payment_purposes WHERE is_active = 1 ORDER BY sort_order, code`
+    ).catch(() => [null]);
+    if (!rows) {
+      // Pre-migration safety net — same shape, legacy catalog.
+      const legacy = Object.entries(PURPOSE_STK)
+        .filter(([code]) => code !== 'general')
+        .map(([code, v], i) => ({
+          code, label: v.desc, description: null, amount_kes: null,
+          audience: 'both', sort_order: 50 + i,
+        }));
+      return res.json({ purposes: legacy, source: 'legacy' });
+    }
+    return res.json({
+      purposes: rows.map((r) => ({
+        code: r.code,
+        label: r.label,
+        description: r.description || null,
+        amount: r.amount_kes === null ? null : Number(r.amount_kes),
+        audience: r.audience,
+      })),
+      source: 'table',
+    });
+  } catch (e) {
+    return next(e);
+  }
+});
+
 // POST /api/payments/stk-push
 // §5 verification gate — spending money is a platform service; unverified
 // accounts must clear phone/email verification first. Browsing stays open.
@@ -118,7 +172,9 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
     }
     const t0 = Date.now();
 
-    const amount = Math.round(Number(req.body && req.body.amount));
+    // let (not const): fixed-price purposes get their table price enforced
+    // below, which reassigns this value before the row is written.
+    let amount = Math.round(Number(req.body && req.body.amount));
     if (!Number.isFinite(amount) || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
       return res.status(400).json({
         message: `Enter an amount between KES ${MIN_AMOUNT} and KES ${MAX_AMOUNT}.`,
@@ -133,6 +189,29 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       return res.status(400).json({ message: 'Enter a valid Kenyan number, e.g. 0712 345 678.' });
     }
     const purpose = String((req.body && req.body.purpose) || 'general').slice(0, 64);
+
+    // §9 pricing table — the DB is the single source of truth for WHAT can be
+    // paid for and WHAT it costs. Unknown purposes are rejected (typo guard),
+    // inactive ones are refused (product pulled), and fixed-price purposes
+    // get their price ENFORCED here: a tampered client can never pay less
+    // than the table says. 'general' (no purpose) keeps the free amount.
+    let purposeRow = null;
+    if (purpose !== 'general') {
+      purposeRow = await loadPurpose(purpose);
+      if (!purposeRow) {
+        return res.status(400).json({ message: 'Unknown payment purpose. Update the app and try again.', code: 'bad_purpose' });
+      }
+      if (!purposeRow.is_active) {
+        return res.status(409).json({ message: 'This payment option is currently unavailable.', code: 'purpose_inactive' });
+      }
+      if (purposeRow.amount_kes !== null) {
+        const fixed = Math.round(Number(purposeRow.amount_kes));
+        if (Number.isFinite(fixed) && fixed >= MIN_AMOUNT && fixed <= MAX_AMOUNT && fixed !== amount) {
+          console.error(`[MPESA] purpose ${purpose} price enforced: client sent ${amount}, table says ${fixed} — using ${fixed}`);
+          amount = fixed;
+        }
+      }
+    }
     console.error(
       `[MPESA] push request → user=${req.user.uid} amount=${amount} phone=${phone} purpose=${purpose}` +
         ` (t+${Date.now() - (req.t0 || t0)}ms after request start — body parse + JWT auth + user lookup)`
@@ -154,7 +233,11 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       console.error(`[MPESA] row #${paymentId} dispatching Daraja STK push…`);
       try {
         // Per-purpose label so the customer can tell WHY they are paying.
-        const label = PURPOSE_STK[purpose] || { ref: purpose, desc: 'Maidora' };
+        // Table values win (owner-editable); the legacy map is the fallback.
+        const legacy = PURPOSE_STK[purpose] || { ref: purpose, desc: 'Maidora' };
+        const label = purposeRow
+          ? { ref: purposeRow.stk_ref || legacy.ref, desc: purposeRow.stk_desc || legacy.desc }
+          : legacy;
         const push = await mpesa.stkPush({
           amount,
           phone,
@@ -186,19 +269,32 @@ router.post('/stk-push', requireAuth, requireVerified, async (req, res, next) =>
       paymentId,
       checkoutRequestId: null, // filled on the row once Daraja accepts
       queued: true,
+      amount, // server-enforced — reflects any table price override
+      purposeLabel: purposeRow ? purposeRow.label : null,
     });
   } catch (e) {
     next(e);
   }
 });
 
-// GET /api/payments — user's recent payments
+// GET /api/payments — user's recent payments (purpose label joined for the
+// receipts list; degrades to the plain query when the catalog is absent).
 router.get('/', requireAuth, async (req, res, next) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 20',
-      [req.user.uid]
-    );
+    let rows;
+    try {
+      [rows] = await pool.query(
+        `SELECT p.*, pp.label AS purpose_label
+         FROM payments p LEFT JOIN payment_purposes pp ON pp.code = p.purpose
+         WHERE p.user_id = ? ORDER BY p.id DESC LIMIT 20`,
+        [req.user.uid]
+      );
+    } catch (joinErr) {
+      [rows] = await pool.query(
+        'SELECT * FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 20',
+        [req.user.uid]
+      );
+    }
     return res.json({ payments: rows.map(paymentView) });
   } catch (e) {
     next(e);
@@ -210,10 +306,20 @@ router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ message: 'Invalid payment.' });
-    const [rows] = await pool.query(
-      'SELECT * FROM payments WHERE id = ? AND user_id = ? LIMIT 1',
-      [id, req.user.uid]
-    );
+    let rows;
+    try {
+      [rows] = await pool.query(
+        `SELECT p.*, pp.label AS purpose_label
+         FROM payments p LEFT JOIN payment_purposes pp ON pp.code = p.purpose
+         WHERE p.id = ? AND p.user_id = ? LIMIT 1`,
+        [id, req.user.uid]
+      );
+    } catch (joinErr) {
+      [rows] = await pool.query(
+        'SELECT * FROM payments WHERE id = ? AND user_id = ? LIMIT 1',
+        [id, req.user.uid]
+      );
+    }
     const p = rows[0];
     if (!p) return res.status(404).json({ message: 'Payment not found.' });
 
