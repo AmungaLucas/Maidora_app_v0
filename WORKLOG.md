@@ -6,6 +6,55 @@
 
 ---
 
+## 2026-10-31 (later) — Blank-screen-after-OTP + login-latency fixes · GPS now fills location_county/area
+
+Owner's field report from testing `2adcc6a`: OTP verify → **"blank screen with
+back arrow which took me to login screen"** → login "button loads and nothing
+happens" → restart → RoleSelect → Employer → home. Plus: "on the table(users)
+location_area and location_county are null — do we delete those fields?"
+
+**1. Blank screen — root cause found in the hardening itself.**
+`OtpScreen.verify` still did `await setPendingReg(null)` BEFORE `signIn`
+(`signIn` clears pendingReg itself). That early flip (a) hit OtpScreen's own
+`if (!pendingReg) return <Screen/>` guard → the screen rendered EMPTY under
+the stack header with the automatic back chevron — the exact sighting — and
+(b) produced the transient `[AUTH] root: key=out → Login (pendingReg=false)`
+line right before the real `key=in → RoleSelect` remount, visible in the
+owner's pasted trail. Fix: the premature clear is removed; `signIn` batches
+token+user+pendingReg-null in ONE render, so the first state flip IS the
+remount — nothing renders in between. `finishingRef` stays as a guard.
+
+**2. "Login button loads and nothing happens" — latency, not a dead end.**
+The trail proves both login attempts COMPLETED (`signIn` → `key=in →
+RoleSelect` twice). The dead-feeling button: submit awaited a COLD GPS fix
+(permission check + lock + reverse geocode, 6s race) BEFORE `api.login`.
+Fix: `fetchLocationIfPermitted()` (silent, never prompts) pre-warms the fix
+at screen mount; by the time credentials are typed it is ready and submit is
+a single round trip. No pre-warmed fix → one 3s-capped attempt; still none →
+login proceeds WITHOUT a location stamp (§6 best-effort).
+
+**3. location_county / location_area NULL — columns KEPT, now populated.**
+Nothing ever sent them: the backend has accepted `locationArea`/
+`locationCounty` at BOTH `/register` and `/auth/login` from day one
+(`sanitizeLoginLocation` + register insert), but the app only sent the
+`location_name` display string. `location.js` now derives county (city/
+region) + area (district/subregion/name) from the reverse geocode and
+Signup + Login send the pair — GPS users get structured location for free.
+The GUIDED county+area picker (47 counties + estate suggestions, GPS
+pre-seeded) is ADVISED as the authoritative source — awaiting go-ahead.
+
+**4. `[AUTH]` round-trip logs** for every `/auth/*` call in `api.js` (same
+contract as `[MPESA]`/`[KYC]`) — the next "login did nothing" report arrives
+with latency + status right next to the state trail.
+
+Verified: babel parse OK on all 5 edited files. No backend change needed.
+Answers sent to the owner: child tables KEEP their BIGINT ids (migrate_v7
+decision), AUTO_INCREMENT drift = DELETE never rewinds (v7 TRUNCATEd the
+transient tables), abandoned OTP = account exists in `pending_verification`
+and pendingReg survives restart by design.
+
+---
+
 ## 2026-10-31 — `users.id` IS the UUID: PK + every FK converted (owner request) · signup keyboard + location auto-fill · OTP-handoff navigation hardening
 
 Owner cleared the database "to try again from start" and upgraded the earlier

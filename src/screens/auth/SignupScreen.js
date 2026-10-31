@@ -48,7 +48,12 @@ export default function SignupScreen({ navigation }) {
       const result = await fetchLocationIfPermitted();
       if (!result || cancelled || autofilledRef.current) return;
       autofilledRef.current = true;
-      setCoords({ latitude: result.latitude, longitude: result.longitude });
+      setCoords({
+        latitude: result.latitude,
+        longitude: result.longitude,
+        locationCounty: result.locationCounty || null,
+        locationArea: result.locationArea || null,
+      });
       setForm((f) => (f.locationName ? f : { ...f, locationName: result.locationName || '' }));
     })();
     return () => {
@@ -61,7 +66,12 @@ export default function SignupScreen({ navigation }) {
     setErrorMessage('');
     try {
       const result = await captureCurrentLocation();
-      setCoords({ latitude: result.latitude, longitude: result.longitude });
+      setCoords({
+        latitude: result.latitude,
+        longitude: result.longitude,
+        locationCounty: result.locationCounty || null,
+        locationArea: result.locationArea || null,
+      });
       setForm((f) => ({
         ...f,
         locationName: result.locationName || f.locationName || '',
@@ -89,6 +99,8 @@ export default function SignupScreen({ navigation }) {
         locationName: form.locationName.trim(),
         latitude: coords ? coords.latitude : undefined,
         longitude: coords ? coords.longitude : undefined,
+        locationCounty: coords ? coords.locationCounty || undefined : undefined,
+        locationArea: coords ? coords.locationArea || undefined : undefined,
         locationSource: coords ? 'gps' : 'manual',
         referralCode: form.referralCode.trim() || undefined,
       });

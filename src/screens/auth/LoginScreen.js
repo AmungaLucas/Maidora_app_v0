@@ -1,11 +1,11 @@
 // Login — email OR phone + password.
 // §6: best-effort GPS capture at login updates the stored location (a denied
 // permission or a failed fix changes nothing — last known location stands).
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../../api';
 import { useApp } from '../../context/AppContext';
-import { captureCurrentLocation } from '../../location';
+import { captureCurrentLocation, fetchLocationIfPermitted } from '../../location';
 import { colors, radius } from '../../theme';
 import { isValidEmail, isValidPhone } from '../../validation';
 import { Banner, PrimaryButton, Screen, TextField } from '../../ui';
@@ -17,15 +17,62 @@ export default function LoginScreen({ navigation }) {
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  // Location fix pre-warmed while the user types their credentials (never
+  // null once ready) — see the effect below.
+  const locationRef = useRef(null);
 
   const canSubmit = useMemo(
     () => (isValidEmail(identifier) || isValidPhone(identifier)) && password.length > 0,
     [identifier, password]
   );
 
-  // §6 — location auto-update at login. Silent + best-effort: never blocks
-  // the login and never shows an error; permission prompts only appear if
-  // the OS still owes one.
+  // §6 — location auto-update at login. PRE-WARMED (owner report 2026-10-31
+  // — "the button loads and nothing happens"): the old submit awaited a cold
+  // GPS fix for up to 6s BEFORE the API call, so the Log In button spun
+  // through permission check + GPS lock + reverse geocode + round trip. Now
+  // a silent capture starts at mount (permission is usually already granted
+  // — never prompts), so the fix is ready before credentials are typed and
+  // submit is a single round trip. No pre-warmed fix → one 3s-capped
+  // attempt; still nothing → log in WITHOUT a location stamp (best-effort
+  // per §6 — a failed fix changes nothing).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await fetchLocationIfPermitted();
+        if (!result || cancelled) return;
+        locationRef.current = {
+          latitude: result.latitude,
+          longitude: result.longitude,
+          locationName: result.locationName || undefined,
+          locationCounty: result.locationCounty || undefined,
+          locationArea: result.locationArea || undefined,
+          locationSource: 'gps',
+        };
+      } catch {
+        // GPS denied/off — submit proceeds without a location stamp.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const locationForLogin = async () => {
+    if (locationRef.current) return locationRef.current; // ready — instant
+    try {
+      return await Promise.race([
+        captureLoginLocation(),
+        new Promise((resolve) => setTimeout(() => resolve(undefined), 3000)),
+      ]);
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Fallback capture (used only when the pre-warm has not landed yet):
+  // silent + best-effort, never shows an error; permission prompts only
+  // appear if the OS still owes one.
   const captureLoginLocation = async () => {
     try {
       const result = await Promise.race([
@@ -50,7 +97,7 @@ export default function LoginScreen({ navigation }) {
     setSubmitting(true);
     setErrorMessage('');
     try {
-      const location = await captureLoginLocation();
+      const location = await locationForLogin();
       const res = await api.login({
         identifier: identifier.trim(),
         password,

@@ -15,22 +15,39 @@ export async function captureCurrentLocation() {
   const { latitude, longitude } = position.coords;
 
   let locationName = '';
+  let locationCounty = null;
+  let locationArea = null;
   try {
     const places = await Location.reverseGeocodeAsync({ latitude, longitude });
     if (places && places.length > 0) {
       const p = places[0];
-      // Compose e.g. "Nairobi, Utawala" from whatever the geocoder gives us.
+      // Display string, e.g. "Nairobi, Utawala" — unchanged.
       const parts = [p.district || p.subregion, p.city || p.region].filter(Boolean);
       const unique = [...new Set(parts)];
       locationName = unique.join(', ');
       if (!locationName && p.name) locationName = p.name;
       if (!locationName && p.country) locationName = p.country;
+
+      // Structured pair (§4.1) — the users.location_county / location_area
+      // columns used to stay NULL because nothing filled them (owner report
+      // 2026-10-31). Best-effort GPS derivation: county ≈ city/region,
+      // area ≈ district/subregion/neighborhood name. The guided county+area
+      // picker (advice sent to the owner, awaiting go-ahead) remains the
+      // authoritative source; this only pre-seeds the columns so GPS users
+      // get structured location for free.
+      const county = [p.city, p.region].find((v) => v && String(v).trim()) || null;
+      const area = [p.district, p.subregion, p.name].find((v) => v && String(v).trim()) || null;
+      locationCounty = county ? String(county).trim().slice(0, 120) : null;
+      locationArea =
+        area && (!county || String(area).trim().toLowerCase() !== String(county).toLowerCase())
+          ? String(area).trim().slice(0, 120)
+          : null;
     }
   } catch {
     // Reverse geocoding can fail (no Play Services, offline). The field stays editable.
   }
 
-  return { latitude, longitude, locationName };
+  return { latitude, longitude, locationName, locationCounty, locationArea };
 }
 
 // Silent auto-fill: returns a fix ONLY when permission is ALREADY granted.

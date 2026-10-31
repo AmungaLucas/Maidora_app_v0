@@ -7,6 +7,10 @@ import { kbOf } from './kycLog';
 // in the console: state fetch, draft saves, uploads (with payload size),
 // submit. Payloads themselves are never logged — only their size.
 const KYC_PATH = /^\/(kyc|media)(\/|$)/;
+// Auth round trips log under [AUTH] — the same contract as [MPESA]/[KYC],
+// so "login did nothing" style reports arrive with their own trail next to
+// the [AUTH] state logs from AppContext/App.js.
+const AUTH_PATH = /^\/auth(\/|$)/;
 
 export class ApiError extends Error {
   constructor(message, status, code, field) {
@@ -58,6 +62,9 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
     if (KYC_PATH.test(path)) {
       console.log(`[KYC]${kycTag} ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
     }
+    if (AUTH_PATH.test(path)) {
+      console.log(`[AUTH] ${method} ${path} → ${res.status} in ${Date.now() - reqT0}ms`);
+    }
     return data;
   } catch (e) {
     const msg = String((e && e.message) || '');
@@ -72,6 +79,11 @@ async function request(path, { method = 'GET', body, token, timeoutMs = 20000 } 
     if (KYC_PATH.test(path)) {
       console.log(
         `[KYC]${kycTag} ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
+      );
+    }
+    if (AUTH_PATH.test(path)) {
+      console.log(
+        `[AUTH] ${method} ${path} ✗ ${Date.now() - reqT0}ms — name=${name} msg="${msg}" status=${e && e.status}`
       );
     }
     // The device's fetch rejects with different shapes for a cancelled call

@@ -58,7 +58,14 @@ export default function OtpScreen({ navigation }) {
     finishingRef.current = true;
     try {
       const res = await api.verifyOtp({ userId: pendingReg.userId, code: value });
-      await setPendingReg(null);
+      // NO setPendingReg(null) here (owner report 2026-10-31 — "blank screen
+      // with back arrow"): the old explicit await flipped pendingReg BEFORE
+      // signIn committed, which (a) hit the `if (!pendingReg)` guard below
+      // and rendered this screen EMPTY under the stack header, and (b) put
+      // the root in a transient key=out → Login state ahead of the real
+      // key=in remount. signIn clears pendingReg itself, batched with
+      // token+user in ONE render — the very first flip is already the
+      // remount, so there is nothing to see in between.
       await signIn(res.token, res.user);
       // NO manual navigation here (same principle as the 2026-10-31 logout
       // fix): signIn flips the root navigator's auth key and the stack
