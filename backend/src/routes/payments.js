@@ -55,6 +55,7 @@ const PURPOSE_STK = {
   application:       { ref: 'APPLICATION',  desc: 'Application' },
   maid_basic:        { ref: 'MAIDBASIC',    desc: 'Maid Basic' },
   maid_gold:         { ref: 'MAIDGOLD',     desc: 'Maid Gold' },
+  employer_gold:     { ref: 'EMPLOYERGOLD', desc: 'Employer Gold' },
   profile_boost:     { ref: 'PROFILEBOOST', desc: 'Profile boost' },
   application_boost: { ref: 'APPBOOST',     desc: 'App boost' },
   kyc_urgent:        { ref: 'KYCURGENT',    desc: 'Urgent KYC' },

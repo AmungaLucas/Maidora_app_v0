@@ -71,6 +71,20 @@ const RECEIPT_EXTRA_POLLS = 8; // keep polling ~30s after success until the rece
 const ADOPT_WINDOW_MS = 3 * 60 * 1000; // adopt a pending row created within 3 min
 const RESUME_WINDOW_MS = 10 * 60 * 1000; // offer to resume a pending row up to 10 min old
 
+// Payment purposes (§9 product slots — backend PURPOSE_STK map has the STK
+// labels). `amount: null` = user picks from AMOUNTS; a number = fixed price
+// and the amount chips hide. PRICES ARE PROVISIONAL for boost/plans until
+// the products ship (§10) — only kyc_urgent's KES 150 is owner-confirmed.
+// Entitlements (granting the plan/boost after settlement) land with §10.
+const PRODUCTS = [
+  { key: 'app_test', label: 'STK push test', amount: null },
+  { key: 'kyc_urgent', label: 'KYC expedite', amount: 150 },
+  { key: 'profile_boost', label: 'Profile boost', amount: 100 },
+  { key: 'maid_basic', label: 'Maid Basic', amount: 200 },
+  { key: 'maid_gold', label: 'Maid Gold', amount: 500 },
+  { key: 'employer_gold', label: 'Employer Gold', amount: 500 },
+];
+
 // Daraja result codes -> human sentences. Tone: neutral, specific, never
 // alarmist — 1032 (user cancelled) reads very differently from 1 (balance).
 // 1037 = DS timeout: the prompt WAS sent, the PIN just never arrived in
@@ -139,6 +153,7 @@ function StepRow({ state, title, sub, last }) {
 export default function PaymentScreen({ navigation }) {
   const { user, token } = useApp();
   const [amount, setAmount] = useState(1);
+  const [purpose, setPurpose] = useState('app_test'); // key into PRODUCTS
   const [phone, setPhone] = useState(user?.phone || '');
   const [phoneError, setPhoneError] = useState('');
   const [error, setError] = useState('');
@@ -325,12 +340,14 @@ export default function PaymentScreen({ navigation }) {
       setPhoneError('Enter a valid Kenyan number, e.g. 0712 345 678.');
       return;
     }
+    const product = PRODUCTS.find((p) => p.key === purpose) || PRODUCTS[0];
+    const payAmount = product.amount || amount; // fixed price or chosen amount
     setStarting(true);
-    log(`start — amount KES ${amount}, phone ${phone.trim()}`);
+    log(`start — purpose ${product.key}, amount KES ${payAmount}, phone ${phone.trim()}`);
     const t0 = Date.now();
     try {
       const res = await api.mpesaStkPush(
-        { amount, phone: phone.trim(), purpose: 'app_test' },
+        { amount: payAmount, phone: phone.trim(), purpose: product.key },
         token
       );
       log(`push accepted by gateway in ${Date.now() - t0}ms — payment #${res.paymentId}${res.queued ? ' (Daraja push running in background)' : ''}`);
@@ -382,6 +399,9 @@ export default function PaymentScreen({ navigation }) {
   // by the gateway right after Daraja accepts — visible on the next poll).
   const pushSent = !!(payment && payment.checkoutRequestId);
   const remaining = Math.max(0, TOTAL_WAIT_S - elapsed);
+  // The selected product card drives the button title and the tracker copy.
+  const product = PRODUCTS.find((p) => p.key === purpose) || PRODUCTS[0];
+  const payAmount = product.amount || amount; // mirrors start()
   // Inside the Profile drawer → hamburger + HomeTab exit; root-stack copy → goBack.
   const inDrawer = typeof navigation.openDrawer === 'function';
 
@@ -390,7 +410,7 @@ export default function PaymentScreen({ navigation }) {
   const stageRows = [
     {
       title: 'Payment accepted by gateway',
-      sub: payment ? `KES ${amount} · payment #${payment.id}` : null,
+      sub: payment ? `KES ${payAmount} · ${product.label} · payment #${payment.id}` : null,
       state: 'done',
     },
     {
@@ -503,21 +523,52 @@ export default function PaymentScreen({ navigation }) {
         </Animated.View>
       ) : (
         <>
-          <Text style={styles.label}>Amount (KES)</Text>
+          <Text style={styles.label}>Payment purpose</Text>
           <View style={styles.chipRow}>
-            {AMOUNTS.map((a) => (
+            {PRODUCTS.map((p) => (
               <Pressable
-                key={a}
-                onPress={() => setAmount(a)}
-                disabled={starting}
-                style={[styles.chip, amount === a && styles.chipActive]}
+                key={p.key}
+                onPress={() => {
+                  setPurpose(p.key);
+                  if (p.amount) setAmount(p.amount); // lock the fixed price in
+                }}
+                disabled={starting || pending}
+                style={[styles.chip, purpose === p.key && styles.chipActive]}
               >
-                <Text style={[styles.chipText, amount === a && styles.chipTextActive]}>
-                  {a}
+                <Text style={[styles.chipText, purpose === p.key && styles.chipTextActive]}>
+                  {p.label}
+                </Text>
+                <Text style={[styles.chipSub, purpose === p.key && styles.chipTextActive]}>
+                  {p.amount ? `KES ${p.amount}` : 'any amount'}
                 </Text>
               </Pressable>
             ))}
           </View>
+          <Text style={styles.purposeNote}>
+            {product.amount
+              ? `Fixed price · KES ${product.amount}. Plan & boost prices are provisional until the products launch.`
+              : 'Test checkout — pick any amount below.'}
+          </Text>
+
+          {product.amount ? null : (
+            <>
+              <Text style={styles.label}>Amount (KES)</Text>
+              <View style={styles.chipRow}>
+                {AMOUNTS.map((a) => (
+                  <Pressable
+                    key={a}
+                    onPress={() => setAmount(a)}
+                    disabled={starting}
+                    style={[styles.chip, amount === a && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, amount === a && styles.chipTextActive]}>
+                      {a}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          )}
 
           <TextField
             label="Phone to charge"
@@ -532,7 +583,7 @@ export default function PaymentScreen({ navigation }) {
           />
 
           <PrimaryButton
-            title={`Send STK Push · KES ${amount}`}
+            title={`Send STK Push · KES ${payAmount}`}
             onPress={start}
             disabled={starting}
             loading={starting}
@@ -562,6 +613,8 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: colors.brand, backgroundColor: colors.brand },
   chipText: { color: colors.ink, fontWeight: '700', fontSize: 15 },
   chipTextActive: { color: colors.white },
+  chipSub: { color: colors.muted, fontSize: 11.5, fontWeight: '600', marginTop: 1 },
+  purposeNote: { marginTop: -8, marginBottom: 14, fontSize: 12, lineHeight: 17, color: colors.muted },
   statusCard: {
     alignItems: 'center',
     backgroundColor: colors.card,

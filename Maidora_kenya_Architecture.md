@@ -31,11 +31,11 @@ contains the **mobile app** (Expo/React Native) and the **API gateway**
 | App: Welcome → Signup → OTP → Onboarding → Tabs | ✅ LIVE in Expo Go | React Navigation v7 |
 | App: role-based bottom tabs | ✅ LIVE | Employer & Househelp tab sets |
 | App: Profile DRAWER navigation | ✅ LIVE | `@react-navigation/drawer` 7.14 + RNGH 3.3: ProfileMain · Verification · Payments · Settings inside the drawer; hamburger + swipe. **Drawer-width bug fixed 2026-10-30** (was `Math.min(320, 0.82)` → 0.82 px panel, drawer appeared dead; now `window.width*0.82` capped 320, rotation-aware, safe-area padded). Profile screen rebuilt: hamburger LEFT, Account-status rows (email → §5 sheet), §7 % bar, Trust Badge upsell when complete; screens reorganized under `src/screens/{auth,home,maid,employer,chat,profile,payments,settings,verification}/`; Home header = avatar → Profile (settings icon removed) |
-| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending card shows a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN → confirmed), a **countdown** ("3:28 remaining") and a "Didn't get a prompt?" tips toggle; **success/failure are now SEPARATE screens with BRAND ANIMATIONS** — SuccessMark (the mark draws itself: radar lock-on ping → house strokes draw in → gold seam finishes with a spark + one restrained brand spark burst; no generic checkmark, no confetti) and FailMark (radar rings collapse onto a ghost of the mark + gentle shake; calm code-specific failure card, Try Again + Back to Home); receipt, amount, paid-at EAT, never on the synchronous ResponseCode 0; **resume banner** offers to reattach a ≤10-min-old pending row on mount (app-closed-mid-payment edge case); no full-screen veil — the button's radar carries the push call; card crossfade retained |
+| App: M-Pesa payment screen + polling | ✅ LIVE | 3.5-min patient polling, receipt chase, friendly failures; **staged progress tracker 2026-10-31** — the pending card shows a 4-step tracker driven by real events (gateway accepted → prompt sent [`checkout_request_id` set] → enter PIN → confirmed), a **countdown** ("3:28 remaining") and a "Didn't get a prompt?" tips toggle; **payment PURPOSE selector 2026-10-31** — chip row of §9 product slots (STK push test = any amount; KYC expedite K150 owner-confirmed; Profile boost K100 / Maid Basic K200 / Maid Gold K500 / Employer Gold K500 **provisional until the products launch**), fixed-price purposes lock the amount and hide the chips, purpose lands on the payments row (E2E-proven) — entitlements still §10; **success/failure screens with BRAND ANIMATIONS** — SuccessMark (the mark draws itself: radar lock-on ping → house strokes draw in → gold seam finishes with a spark + one restrained brand spark burst; no generic checkmark, no confetti) and FailMark (radar rings collapse onto a ghost of the mark + gentle shake; calm code-specific failure card, Try Again + Back to Home); receipt, amount, paid-at EAT, never on the synchronous ResponseCode 0; **resume banner** offers to reattach a ≤10-min-old pending row on mount; no full-screen veil — the button's radar carries the push call; card crossfade retained |
 | Animated splash + brand loaders | ✅ LIVE | Reanimated 4.7.1 (Expo Go — clear cache if crash, see §9.3) |
 | Offline / no-data UX | ✅ LIVE | NetInfo banner + human error mapping in `src/api.js` |
 | Job listings / applications / matching | ⏳ PENDING | Screens are placeholders; no backend yet |
-| KYC flow (§8) | 🟡 SUBMISSION LIVE | 8-step app flow + draft/images/submit API + urgent KSh 150 STK grant; review tooling + blur/glare ML deferred (see §10) |
+| KYC flow (§8) | 🟡 SUBMISSION LIVE | 8-step app flow + draft/images/submit API + urgent KSh 150 STK grant; review tooling + blur/glare ML deferred (see §10). **Personal step fixes 2026-10-31 (owner live report)**: DOB now prefills from the §7 profile when the KYC draft is empty (same lowercase gender enum, 1:1); DOB state is ISO-only (the display string was being round-tripped through a DD-MM-YYYY parser — EVERY picker-picked DOB failed Continue with an error that was never rendered, i.e. the dead-Continue bug); `errors.dob` now renders (red text + field border); gender pills rebuilt (icon + label, forest fill + cream text + check when selected — the old SecondaryButton chips were forest-on-forest when selected) |
 | Paywall after 2 applications (§9) | ⏳ PENDING | Needs applications first |
 | Visibility decay ranking (§10) | ⏳ PENDING | `last_active_at` collected; ranking ships with search |
 | Real chat backend | ⏳ PENDING | Chats tab is a placeholder |
@@ -288,8 +288,12 @@ row first** → `mpesa.stkPush` (OAuth cached, password =
 base64(shortcode+passkey+**Kenya-time** timestamp), **AccountReference +
 TransactionDesc from the `PURPOSE_STK` map — purpose → ≤12-char alnum ref /
 ≤13-char desc, e.g. `app_test`→TEST/"Test payment", `kyc_urgent`→KYCURGENT/
-"Urgent KYC"**) → persist `checkout_request_id` → app starts polling. Daraja
-refuses → row marked `failed` with the reason.
+"Urgent KYC", `employer_gold`→EMPLOYERGOLD/"Employer Gold" (added 2026-10-31
+with the app's purpose selector; row round-trip E2E-proven)**) → persist
+`checkout_request_id` → app starts polling. Daraja
+refuses → row marked `failed` with the reason (4999 "existing USSD Session"
+observed live 2026-10-31 when two pushes hit the same MSISDN 2 s apart —
+the second row correctly settles `failed` from the callback).
 
 The row's `checkout_request_id` doubles as the client's **stage-2 signal**:
 `paymentView` always exposes it, `null` until Daraja accepts (the background

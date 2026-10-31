@@ -6,6 +6,58 @@
 
 ---
 
+## 2026-10-31 — Payment purposes + KYC personal-step fixes (owner live report)
+
+Owner: payment purposes wanted ("STK Push test, KYC expeditiation, Profile
+boost, Maid Basic subscription, employer gold subscription etc."), and three
+live bugs in Identity & Verification step 1: DOB not fetched, gender buttons
+need a better UI, "when I click continue, nothing happens".
+
+- **ROOT CAUSE of the dead Continue (KycPersonalScreen)**: the DOB state
+  held the DISPLAY string ("12 Mar 2002") but `onContinue` fed it into
+  `normalizeDobInput` — which only parses `DD-MM-YYYY` / `YYYY-MM-DD` — so
+  EVERY picker-chosen (or prefilled) DOB failed validation, and the one
+  error it set (`errors.dob`) was never rendered anywhere on the screen.
+  Silent death, exactly as reported. Fix: DOB state is now the ISO string
+  (`YYYY-MM-DD`), the field only renders `formatDate(iso)`, validation is a
+  straight regex matching the server, and `errors.dob` renders as red text
+  plus a red field border.
+- **DOB "not fetched"**: the screen only read the KYC draft
+  (`kyc_date_of_birth`); the §7 profile wizard stores DOB/gender in the
+  PROFILE tables. KycPersonalScreen now prefills DOB + gender from
+  `GET /profile` when the draft lacks them (same lowercase `GENDERS` enum —
+  1:1), filling only empty fields and never marking the form dirty.
+- **Gender pills rebuilt**: the old `SecondaryButton` chips turned
+  forest-on-forest when selected (unreadable). New pills: icon + label,
+  forest fill + cream text + checkmark when selected, tap again to
+  un-select (withhold), radio accessibility roles.
+- **Payment purposes (app)**: PaymentScreen gains a purpose chip row
+  (§9 product slots) — `app_test` any amount, `kyc_urgent` K150
+  (owner-confirmed), `profile_boost` K100, `maid_basic` K200, `maid_gold`
+  K500, `employer_gold` K500 — the last four **PROVISIONAL prices** pending
+  the owner's product decisions; the on-screen note says so. Fixed-price
+  purposes lock the amount and hide the amount chips; the purpose is sent
+  on the push and shows in the tracker ("KES 500 · Employer Gold · payment
+  #id").
+- **Gateway**: `PURPOSE_STK` gains `employer_gold` (ref `EMPLOYERGOLD`,
+  desc "Employer Gold"). Deployed via `scripts/deploy_purpose_map.py`:
+  backup → upload → node --check → restart → health → register+OTP →
+  stk-push purpose=employer_gold KES 500 (row `55|employer_gold|500.00|
+  pending`, Daraja accepted) + kyc_urgent regression guard. BONUS live
+  proof: the second push to the same unallocated MSISDN 2 s apart settled
+  `failed` via callback with rc=4999 "Duplicated MSISDN… existing USSD
+  Session" — the documented 4999 path works on the new purpose flow.
+  (First script run showed 2 assertion-format failures — `500.00` DECIMAL
+  and the 4999 collision — assertions made format-tolerant; no code issue.)
+- **Validation**: `check_jsx_marks.js` 4/4 parse OK; smoke test extended to
+  29 checks — KYC renders with ISO DOB (formatted, 3 radio pills, no
+  `normalizeDobInput` left), PaymentScreen renders all 6 purpose chips +
+  provisional-price note, all 57 animation interpolation configs still
+  clamp-clean.
+- **Entitlements are still §10** — settling a `maid_basic`/`*_gold`/
+  `profile_boost` payment records the row + sends the labelled prompt but
+  grants nothing yet.
+
 ## 2026-10-31 — Brand terminal animations: SuccessMark + FailMark
 
 Owner: "can we design success and failure animations along and around our
